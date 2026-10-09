@@ -11,6 +11,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::env::detect_env,
             commands::env::install_packages,
+            commands::env::install_python,
             commands::env::open_folder,
             commands::jupyter::jupyter_start,
             commands::jupyter::jupyter_stop,

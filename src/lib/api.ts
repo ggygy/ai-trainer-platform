@@ -1,5 +1,5 @@
 // Tauri 命令封装 + 事件监听；浏览器 dev 环境自动降级为 mock
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 export const isTauri = () => "__TAURI_INTERNALS__" in window;
@@ -18,6 +18,22 @@ export async function detectEnv(): Promise<ToolInfo[]> {
 
 export type InstallEvent = { line: string };
 
+/** 订阅安装日志/完成事件并调用后端命令（install_packages 与 install_python 共用） */
+async function streamInstall(
+  command: string,
+  args: InvokeArgs,
+  onLog: (line: string) => void,
+  onDone: (ok: boolean) => void,
+): Promise<void> {
+  const un1 = await listen<InstallEvent>("install-log", (e) => onLog(e.payload.line));
+  const un2 = await listen<{ ok: boolean }>("install-done", (e) => {
+    un1();
+    un2();
+    onDone(e.payload.ok);
+  });
+  await invoke(command, args);
+}
+
 export async function installPackages(
   names: string[],
   onLog: (line: string) => void,
@@ -28,13 +44,17 @@ export async function installPackages(
     onDone(true);
     return;
   }
-  const un1 = await listen<InstallEvent>("install-log", (e) => onLog(e.payload.line));
-  const un2 = await listen<{ ok: boolean }>("install-done", (e) => {
-    un1();
-    un2();
-    onDone(e.payload.ok);
-  });
-  await invoke("install_packages", { names });
+  await streamInstall("install_packages", { names }, onLog, onDone);
+}
+
+/** 安装 Python 运行时本身：Windows winget/python.org 静默装，macOS 下载官方 pkg 并打开图形安装器 */
+export async function installPython(onLog: (line: string) => void, onDone: (ok: boolean) => void): Promise<void> {
+  if (!isTauri()) {
+    onLog("(mock) 按平台安装 Python 运行时（winget / 官方安装包）… 完成");
+    onDone(true);
+    return;
+  }
+  await streamInstall("install_python", {}, onLog, onDone);
 }
 
 export async function openFolder(path: string): Promise<void> {

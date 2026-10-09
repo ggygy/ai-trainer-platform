@@ -15,6 +15,7 @@ import { useStore } from "../lib/store";
 import {
   detectEnv,
   installPackages,
+  installPython,
   jupyterStart,
   jupyterStop,
   onJupyterReady,
@@ -60,6 +61,7 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
 
   const missing = tools.filter((t) => !t.ok && !["python", "pip"].includes(t.name));
   const coreInstalled = tools.filter((t) => t.ok && !["python", "pip"].includes(t.name)).length;
+  const pyMissing = tools.length > 0 && !tools.find((t) => t.name === "python")?.ok;
 
   const runInstall = async () => {
     const names = missing.map((m) => m.name);
@@ -71,6 +73,20 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
       (line) => setLogs((l) => [...l.slice(-400), line]),
       (ok) => {
         setLogs((l) => [...l, ok ? "$ 安装完成 ✓" : "$ 安装过程出现错误，详见上方日志"]);
+        setPhase("idle");
+        detect();
+      },
+    );
+  };
+
+  // 未检测到 Python 时的一键引导安装（Windows 静默装 / macOS 打开官方安装器）
+  const runPythonInstall = async () => {
+    setPhase("installing");
+    setLogs((l) => [...l, "$ ai-trainer env install-python"]);
+    await installPython(
+      (line) => setLogs((l) => [...l.slice(-400), line]),
+      (ok) => {
+        setLogs((l) => [...l, ok ? "$ Python 就绪 ✓" : "$ Python 自动安装未完成，详见上方日志"]);
         setPhase("idle");
         detect();
       },
@@ -119,6 +135,11 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
         sub="一键检测并安装实操题所需的 Python 环境与依赖，Jupyter 就绪后可直接在应用内运行"
         right={
           <>
+            {pyMissing && (
+              <Btn onClick={runPythonInstall} disabled={phase !== "idle"}>
+                <Download size={14} /> 安装 Python 运行时
+              </Btn>
+            )}
             <Btn onClick={detect} disabled={phase !== "idle"}>
               <RotateCw size={14} className={phase === "detecting" ? "animate-spin" : ""} /> 重新检测
             </Btn>

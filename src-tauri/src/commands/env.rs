@@ -132,6 +132,118 @@ fn python_missing_hint() -> &'static str {
     }
 }
 
+/// 应用内自动安装所用 Python 版本（bugfix 期版本，带官方二进制安装器；科学计算包 wheel 覆盖最全）
+const PY_DL_VERSION: &str = "3.13.7";
+
+/// 一键安装 Python 运行时本身（「环境助手」在未检测到 Python 时展示该入口）：
+/// - Windows：优先 winget 静默安装（PrependPath=1），无 winget 或失败则下载 python.org 安装器 /passive 安装；
+///   装到 %LOCALAPPDATA%\Programs\Python\Python3xx——windows_python_fallback 无需重启即可探测到；
+/// - macOS：下载 python.org 官方 pkg 并打开图形安装器（用户点「继续→安装」输密码，无需终端 sudo）；
+///   pkg 会写 /etc/paths.d，新开的 zsh -lc 即可探测到；
+/// - Linux：输出发行版包管理器指引。
+#[tauri::command]
+pub fn install_python(app: AppHandle) {
+    std::thread::spawn(move || {
+        let emit_line = |line: &str| {
+            let _ = app.emit("install-log", serde_json::json!({ "line": line }));
+        };
+        if python_prefix().is_some() {
+            emit_line("✓ 已检测到可用的 Python，无需安装");
+            let _ = app.emit("install-done", serde_json::json!({ "ok": true }));
+            return;
+        }
+        emit_line(&format!("$ 开始安装 Python {PY_DL_VERSION}（按平台选择方式）…"));
+        let ok = install_python_impl(&app);
+        emit_line(
+            if ok {
+                "$ Python 安装流程完成 ✓ 请点「重新检测」"
+            } else {
+                "[错误] Python 自动安装未完成，请按上方日志手动安装后点「重新检测」"
+            },
+        );
+        let _ = app.emit("install-done", serde_json::json!({ "ok": ok }));
+    });
+}
+
+fn install_python_impl(app: &AppHandle) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        windows_python_install(app)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos_python_install(app)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app.emit(
+            "install-log",
+            serde_json::json!({ "line": "[提示] Linux 请用系统包管理器安装：sudo apt install python3 python3-pip（Debian/Ubuntu）或 sudo dnf install python3（Fedora）" }),
+        );
+        false
+    }
+}
+
+/// Windows：winget 静默安装 → 失败回落 python.org 官方安装器直接下载
+#[cfg(target_os = "windows")]
+fn windows_python_install(app: &AppHandle) -> bool {
+    let ver = PY_DL_VERSION;
+    if sh("winget --version").is_some() {
+        app.emit("install-log", serde_json::json!({ "line": "检测到 winget，正在静默安装（下载约 25MB，请耐心等待）…" })).ok();
+        let winget_ok = run_streamed(
+            &format!(
+                "winget install --id Python.Python.313 -e --silent --disable-interactivity \
+                 --accept-package-agreements --accept-source-agreements \
+                 --override \"/quiet InstallAllUsers=0 PrependPath=1 Include_test=0\""
+            ),
+            app,
+        );
+        if winget_ok {
+            app.emit("install-log", serde_json::json!({ "line": "✓ winget 安装完成，Python 位于 %LOCALAPPDATA%\\Programs\\Python" })).ok();
+            return true;
+        }
+        app.emit("install-log", serde_json::json!({ "line": "! winget 安装未成功，改用 python.org 官方安装器" })).ok();
+    }
+    let arch = if std::env::consts::ARCH == "aarch64" { "arm64" } else { "amd64" };
+    let exe_name = format!("python-{ver}-{arch}.exe");
+    let url = format!("https://www.python.org/ftp/python/{ver}/{exe_name}");
+    app.emit("install-log", serde_json::json!({ "line": &format!("正在下载官方安装器 {url} …") })).ok();
+    if !run_streamed(&format!("curl -L -f -o \"%TEMP%\\{exe_name}\" \"{url}\""), app) {
+        app.emit("install-log", serde_json::json!({ "line": "[错误] 下载失败：请检查网络后重试，或到 python.org 手动下载安装（勾选 Add python.exe to PATH）" })).ok();
+        return false;
+    }
+    app.emit("install-log", serde_json::json!({ "line": "正在安装（/passive 显示进度条，PrependPath=1 自动加入 PATH）…" })).ok();
+    let ok = run_streamed(
+        &format!("\"%TEMP%\\{exe_name}\" /passive InstallAllUsers=0 PrependPath=1 Include_test=0"),
+        app,
+    );
+    if ok {
+        app.emit("install-log", serde_json::json!({ "line": "✓ 安装完成，Python 位于 %LOCALAPPDATA%\\Programs\\Python" })).ok();
+    }
+    ok
+}
+
+/// macOS：下载官方 pkg（universal2）到「下载」文件夹并打开图形安装器
+#[cfg(target_os = "macos")]
+fn macos_python_install(app: &AppHandle) -> bool {
+    let ver = PY_DL_VERSION;
+    let pkg = format!("python-{ver}-macos11.pkg");
+    let url = format!("https://www.python.org/ftp/python/{ver}/{pkg}");
+    app.emit("install-log", serde_json::json!({ "line": &format!("正在下载官方安装包（约 65MB）：{url}") })).ok();
+    if !run_streamed(&format!("curl -L -f -o \"$HOME/Downloads/{pkg}\" \"{url}\""), app) {
+        app.emit("install-log", serde_json::json!({ "line": "[错误] 下载失败：请检查网络后重试；也可手动下载后打开，或用 Homebrew：brew install python@3.13" })).ok();
+        return false;
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    let _ = std::process::Command::new("open").arg(format!("{home}/Downloads/{pkg}")).spawn();
+    app.emit(
+        "install-log",
+        serde_json::json!({ "line": "✓ 已打开图形安装器：请点「继续 → 安装」并输入开机密码，装完回到本应用点「重新检测」" }),
+    )
+    .ok();
+    true
+}
+
 #[tauri::command]
 pub fn detect_env() -> Vec<ToolInfo> {
     let mut result: Vec<ToolInfo> = Vec::new();
@@ -211,12 +323,12 @@ pub fn install_packages(names: Vec<String>, app: AppHandle) {
         let list = names.join(" ");
 
         emit_line(&app, format!("$ {p} -m pip install -U {list}"));
-        let mut ok = run_pip(&format!("{p} -m pip install --progress-bar off -U {list}"), &app);
+        let mut ok = run_streamed(&format!("{p} -m pip install --progress-bar off -U {list}"), &app);
 
         // PEP 668（如 Homebrew Python）外部管理环境：自动降级重试（见 ADR-0008）
         if !ok {
             emit_line(&app, "! 检测到外部管理环境，改用 --break-system-packages 重试".into());
-            ok = run_pip(
+            ok = run_streamed(
                 &format!("{p} -m pip install --progress-bar off --break-system-packages -U {list}"),
                 &app,
             );
@@ -226,7 +338,9 @@ pub fn install_packages(names: Vec<String>, app: AppHandle) {
     });
 }
 
-fn run_pip(cmd: &str, app: &AppHandle) -> bool {
+/// 流式执行一条 shell 命令：stdout/stderr 逐行 emit 到 install-log，返回是否成功退出。
+/// pip 安装、winget/curl 下载安装 Python 共用。
+fn run_streamed(cmd: &str, app: &AppHandle) -> bool {
     let mut command = shell_command(cmd);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     no_window(&mut command);

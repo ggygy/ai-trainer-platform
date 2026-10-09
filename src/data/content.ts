@@ -273,6 +273,27 @@ export function chapterTaggedCount(code: string): number {
   return n;
 }
 
+/** 章节种子确定性洗牌：同一章每次进入顺序一致，不同章节互不相同（不用 Math.random，便于测试与续刷） */
+function seededShuffle<T>(arr: T[], seed: string): T[] {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const rand = () => {
+    h = (h + 0x6d2b79f5) | 0;
+    let t = Math.imul(h ^ (h >>> 15), 1 | h);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 export function lessonQuiz(code: string): QuizQuestion[] {
   const pools: Record<"judge" | "single" | "multi", { chapter: number[]; rest: number[] }> = {
     judge: { chapter: [], rest: [] },
@@ -297,11 +318,14 @@ export function lessonQuiz(code: string): QuizQuestion[] {
       if (!any) return out;
     }
   };
+  // 本章打标真题保持稳定交错序；其余全库题目按章节种子洗牌——每个章节的刷题顺序各不相同
   const chapterPart = roundRobin({ judge: pools.judge.chapter, single: pools.single.chapter, multi: pools.multi.chapter });
   const used = new Set(chapterPart.map((q) => q.type + q.id));
-  const restPart = roundRobin({ judge: pools.judge.rest, single: pools.single.rest, multi: pools.multi.rest }).filter(
-    (q) => !used.has(q.type + q.id)
-  );
+  const restPart = roundRobin({
+    judge: seededShuffle(pools.judge.rest, code),
+    single: seededShuffle(pools.single.rest, code),
+    multi: seededShuffle(pools.multi.rest, code),
+  }).filter((q) => !used.has(q.type + q.id));
   return [...chapterPart, ...restPart];
 }
 

@@ -307,7 +307,7 @@ function QuizCard({
       )}
       <div className="mt-3 text-[11px] text-ink3 flex items-center gap-1.5">
         <BookOpen size={12} />
-        例题池为全量题库 {total} 题：本章打标真题交错排在最前，其余题目随后续刷。
+        例题池为全量题库 {total} 题：本章打标真题交错排最前，其余题目按章序洗牌续刷（不同章节顺序不同）。
       </div>
     </Card>
   );

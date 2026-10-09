@@ -137,8 +137,8 @@ fn run_pip(cmd: &str, app: &AppHandle) -> bool {
         return false;
     };
 
-    let mut stdout = child.stdout.take().expect("stdout");
-    let mut stderr = child.stderr.take().expect("stderr");
+    let stdout = child.stdout.take().expect("stdout");
+    let stderr = child.stderr.take().expect("stderr");
     let app2 = app.clone();
     let t1 = std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};

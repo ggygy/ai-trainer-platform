@@ -56,7 +56,7 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
     };
 
     // jupyter 的服务日志（含带 token 的 URL）走 stderr
-    let mut stderr = child.stderr.take().expect("stderr");
+    let stderr = child.stderr.take().expect("stderr");
     let app2 = app.clone();
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};

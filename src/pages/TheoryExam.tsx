@@ -329,8 +329,8 @@ function StartScreen({
           </div>
         </div>
         <div className="text-xs text-ink2 mt-2 leading-relaxed">
-          刷题判分按 <b>用户导入答案 &gt; AI 参考答案</b> 的优先级合并：AI 已预生成全部 {ai.total} 题参考答案（高置信 {ai.high} · 中 {ai.medium} · 低 {ai.low}），
-          低置信题判分仅供参考；从「AI学讯」小程序核对后粘贴官方答案将自动覆盖 AI 答案（当前已导入 {keyCount} 条）。官方全真卷判分不受影响，始终以卷内官方答案为准。
+          刷题判分按 <b>用户导入答案 &gt; AI 参考答案</b> 的优先级合并：AI 参考答案已逐题复核，官方模拟卷 190 题已按官方答案校准（高置信 {ai.high} · 中 {ai.medium} · 低 {ai.low}），
+          低置信题判分仅供参考；如从其他渠道核对出官方答案，粘贴导入后将自动覆盖（当前已导入 {keyCount} 条）。官方全真卷判分不受影响，始终以卷内官方答案为准。
         </div>
       </Card>
 
@@ -338,7 +338,7 @@ function StartScreen({
         <div className="flex items-center justify-between">
           <div>
             <div className="text-[15px] font-semibold text-ink1">官方答案导入（可选，优先级最高）</div>
-            <div className="text-xs text-ink3 mt-1">从小程序「AI学讯」核对答案后，按全真卷连续编号粘贴：判断 1-40 填 √/× · 单选 41-180 · 多选 181-190，自动解析分节保存。</div>
+            <div className="text-xs text-ink3 mt-1">如从其他渠道核对出官方答案，按全真卷连续编号粘贴：判断 1-40 填 √/× · 单选 41-180 · 多选 181-190，自动解析分节保存。</div>
           </div>
         </div>
         <div className="flex gap-2.5 mt-3">

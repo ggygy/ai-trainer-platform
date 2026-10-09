@@ -142,7 +142,7 @@ export default function Dashboard({ go, env }: { go: (p: PageId) => void; env: {
                 onClick={() => go("learn")}
                 className="w-full py-2.5 rounded-lg border border-white/35 text-white text-[13px] font-medium flex items-center justify-center gap-2 hover:bg-white/10"
               >
-                <BookOpen size={14} /> 继续学习 · 数据清洗与标注
+                <BookOpen size={14} /> 继续学习 · 数据拆解高阶方法
               </button>
               <button
                 onClick={() => go("env")}

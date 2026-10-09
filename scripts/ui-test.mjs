@@ -125,20 +125,20 @@ async function run() {
     await see("浏览器预览模式");
   });
 
-  // T7 理论学习：例题轮换 + 判分反馈 + 掌握标记持久化
-  await step("T7 理论学习：下一题轮换→选项判分→标记已掌握持久化", async () => {
+  // T7 理论学习：章节切换 + 例题轮换 + 判分反馈 + 掌握标记持久化
+  await step("T7 理论学习：切章→例题轮换→选项判分→标记已掌握持久化", async () => {
     await nav("理论学习").click();
     await see("配套例题");
-    await see("单选 1/8");
+    await see("例题 1/4");
     await page.getByRole("button", { name: "下一题" }).click();
-    await see("单选 2/8");
+    await see("例题 2/4");
     await page.locator("div.bg-surface.border", { hasText: "配套例题" }).locator("button").last().click();
     await see("正确答案");
     await page.getByRole("button", { name: "标记已掌握" }).click();
     await page.waitForTimeout(200);
     const s = await store();
-    assert.equal(s.mastered?.["k2-2"], true, "mastered[k2-2] 应为 true");
-    assert.ok(s.theoryDone?.["s2"], `例题作答应计入 theoryDone[s2]，实际 ${JSON.stringify(s.theoryDone ?? {})}`);
+    assert.equal(s.mastered?.["3.1.1"], true, "mastered[3.1.1] 应为 true");
+    assert.ok(Object.keys(s.theoryDone ?? {}).length > 0, "例题作答应计入 theoryDone");
   });
 
   // T8 成绩报告：导出下载 + 跳转按钮

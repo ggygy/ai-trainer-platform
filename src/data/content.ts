@@ -223,80 +223,92 @@ export function taskSteps(groupId: string): string[] {
   }
 }
 
-// 理论学习知识体系（依据官方认定要素细目表结构）
-export type KnowledgeNode = {
-  id: string;
-  name: string;
-  level: 1 | 2;
-  progress?: [number, number];
+// 理论学习知识体系：直接采用官方《认定要素细目表》结构（5 大项 / 21 章节 / 300 细目点，带分值）
+import syllabusRaw from "./syllabus.json";
+import lessonsRaw from "./lessons.json";
+import tagsRaw from "./questionTags.json";
+import theoryRaw from "./theory.json";
+
+export const SYLLABUS = syllabusRaw as unknown as {
+  meta: { source: string; totalPoints: number; totalScore: number };
+  domains: { code: string; name: string; score: number; chapters: { code: string; name: string; unit: string; score: number; points: string[] }[] }[];
 };
-export const KNOWLEDGE_TREE: KnowledgeNode[] = [
-  { id: "k1", name: "职业道德与基础知识", level: 1 },
-  { id: "k1-1", name: "职业道德基本守则", level: 2 },
-  { id: "k1-2", name: "法律法规与知识产权", level: 2 },
-  { id: "k1-3", name: "计算机与网络基础", level: 2 },
-  { id: "k2", name: "数据采集与处理", level: 1 },
-  { id: "k2-1", name: "业务数据采集流程", level: 2 },
-  { id: "k2-2", name: "数据清洗与标注", level: 2 },
-  { id: "k2-3", name: "数据审核与脱敏", level: 2 },
-  { id: "k3", name: "业务分析与效果优化", level: 1 },
-  { id: "k3-1", name: "业务需求分析", level: 2 },
-  { id: "k3-2", name: "数据处理流程设计", level: 2 },
-  { id: "k4", name: "数据标注与模型训练", level: 1 },
-  { id: "k4-1", name: "标注规范与质量控制", level: 2 },
-  { id: "k4-2", name: "经典模型原理与应用", level: 2 },
-  { id: "k5", name: "智能系统运维与优化", level: 1 },
-  { id: "k5-1", name: "系统交互流程设计", level: 2 },
-  { id: "k5-2", name: "培训与指导", level: 2 },
-];
+
+export const QUESTION_TAGS = tagsRaw as unknown as {
+  meta: { source: string; untagged: number };
+  judge: Record<string, string>;
+  single: Record<string, string>;
+  multi: Record<string, string>;
+};
+
+const theoryBank = theoryRaw as unknown as { single: { id: number; stem: string; options: [string, string][] }[] };
 
 export type Lesson = {
-  id: string;
-  crumb: string;
+  code: string; // 章节代码 "3.1.1"
+  unit: string; // 所属单元 "3.1 智能系统监控和优化"
   title: string;
-  tags: string[];
+  score: number; // 官方分值
+  pointCount: number; // 官方细目点数
   body: string;
-  points: string[];
-  quizId: string; // 关联理论题库中的题目（single 区第 N 题）
+  keyPoints: string[];
+  tags: string[]; // 页面标签（含例题数，运行时拼装）
 };
-export const LESSONS: Record<string, Lesson> = {
-  "k2-2": {
-    id: "k2-2",
-    crumb: "理论学习 / 数据采集与处理 / 数据清洗与标注",
-    title: "数据清洗与标注流程设计",
-    tags: ["难度 中等", "预计 12 分钟", "配套例题 5 道", "对应考纲 · 数据清洗和标注流程"],
-    body: "数据清洗是业务数据处理流程中的关键环节，目的是识别并处理缺失值、异常值、重复数据和不一致数据，为后续的标注与建模提供高质量数据源。清洗流程一般遵循「审查 → 处理 → 验证 → 记录」四个步骤。",
-    points: [
-      "缺失值处理：删除、均值/中位数/众数填充、保留缺失标记三种策略的适用场景",
-      "异常值检测：3σ 原则与箱线图 IQR 法；处理前必须先区分真异常与录入错误",
-      "标注规范：制定标注指南、双人背靠背标注 + 仲裁机制，保证标注一致性",
-    ],
-    quizId: "single-1",
-  },
-  "k4-2": {
-    id: "k4-2",
-    crumb: "理论学习 / 数据标注与模型训练 / 经典模型",
-    title: "经典模型原理与应用",
-    tags: ["难度 中等", "预计 15 分钟", "配套例题 5 道", "对应考纲 · 模型开发与测试"],
-    body: "三级实操重点考察 Logistic 回归、线性回归与随机森林三类模型。逻辑回归用于二分类（如信用评分），线性回归用于数值预测（如燃油效率），随机森林可兼顾分类与回归且对特征标准化不敏感。建模通用流程：读取数据 → 预处理 → 划分数据集 → 训练 → 评估 → 保存模型。",
-    points: [
-      "train_test_split(test_size=0.2) 固定 random_state 保证可复现",
-      "分类看准确率/混淆矩阵，回归看 RMSE/MAE",
-      "joblib.dump(model, 'model.pkl') 保存模型，考试常考",
-    ],
-    quizId: "single-2",
-  },
-  "k5-1": {
-    id: "k5-1",
-    crumb: "理论学习 / 智能系统运维 / 交互流程",
-    title: "智能系统交互流程设计",
-    tags: ["难度 较易", "预计 10 分钟", "配套例题 5 道", "对应考纲 · 交互流程设计"],
-    body: "交互流程设计考察智能系统（图像识别、语音助手、人脸检测等）从用户输入到系统反馈的完整状态流转。标准框架：触发 → 采集 → 识别/推理 → 结果反馈 → 异常处理。每个环节需明确输入、输出、超时与失败降级策略。",
-    points: [
-      "识别失败的降级路径（重试 → 换交互方式 → 转人工）",
-      "隐私合规：人脸等生物特征数据的采集须单独告知并取得授权",
-      "性能指标：响应时延、识别准确率、并发能力",
-    ],
-    quizId: "single-3",
-  },
+
+const lessonData = lessonsRaw as unknown as {
+  meta: { source: string };
+  lessons: Record<string, { title: string; body: string; keyPoints: string[] }>;
 };
+
+/** 章节配套例题：本章已打标的单选题，不足 4 道时按「同单元 → 同大项」回补（真题数量少的章节） */
+export function lessonQuizIds(code: string, n = 4): number[] {
+  const inChapter = theoryBank.single.filter((q) => QUESTION_TAGS.single[String(q.id)] === code).map((q) => q.id);
+  const unitPrefix = code.split(".").slice(0, 2).join(".");
+  const sameUnit = theoryBank.single.filter((q) => QUESTION_TAGS.single[String(q.id)]?.startsWith(unitPrefix + ".")).map((q) => q.id);
+  const sameDomain = theoryBank.single.filter((q) => QUESTION_TAGS.single[String(q.id)]?.startsWith(code[0] + ".")).map((q) => q.id);
+  const merged = [...new Set([...inChapter, ...sameUnit, ...sameDomain])].sort((a, b) => a - b);
+  return merged.slice(0, n);
+}
+
+export const LESSON_SOURCE_NOTE = "本讲义依据官方《认定要素细目表》细目点与真题提炼编写（非官方教材原文）；下方细目点清单为官方原文。";
+
+// 由 syllabus + lessons.json 组装课程表（21 章全部有课）
+export const LESSONS: Record<string, Lesson> = {};
+for (const d of SYLLABUS.domains)
+  for (const c of d.chapters) {
+    const l = lessonData.lessons[c.code];
+    if (!l) throw new Error(`章节 ${c.code} 缺少课程内容（lessons.json）`);
+    const quizN = lessonQuizIds(c.code).length;
+    LESSONS[c.code] = {
+      code: c.code,
+      unit: c.unit,
+      title: l.title,
+      score: c.score,
+      pointCount: c.points.length,
+      body: l.body,
+      keyPoints: l.keyPoints,
+      tags: [`官方分值 ${c.score} 分`, `细目点 ${c.points.length} 个`, `配套例题 ${quizN} 道`, `所属大项 · ${d.name}`],
+    };
+  }
+
+export type KnowledgeNode = {
+  id: string;
+  code: string; // "3"（大项）或 "3.1.1"（章节）
+  name: string;
+  level: 1 | 2;
+  score: number; // 官方分值
+  quizCount?: number; // level2：配套例题数
+  pointCount?: number;
+};
+export const KNOWLEDGE_TREE: KnowledgeNode[] = SYLLABUS.domains.flatMap((d) => [
+  { id: d.code, code: d.code, name: d.name, level: 1 as const, score: d.score },
+  ...d.chapters.map((c) => ({
+    id: c.code,
+    code: c.code,
+    name: c.name,
+    level: 2 as const,
+    score: c.score,
+    quizCount: lessonQuizIds(c.code).length,
+    pointCount: c.points.length,
+  })),
+]);
+

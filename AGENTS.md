@@ -31,7 +31,10 @@ src/
     mock190.json         # 官方模拟卷 190 题（第5部分），含官方答案；options 是纯文本数组（字母按序号生成）
     aiAnswers.json       # AI 生成的 900 题参考答案 {a: 答案, c: high|medium|low 置信度}
     practicalAnswers.json# 实操 40 题官方参考答案，键 "2.2.1"；3.2.5 官方暂缺
-    content.ts           # 题组/依赖清单/知识树/课程/文案常量
+    content.ts           # 题组/依赖清单/考试信息/文案常量；理论学习树与课程由下列三个文件组装
+    syllabus.json        # 官方《认定要素细目表》：5 大项/21 章节/300 细目点带分值（scripts/build-syllabus.mjs 生成）
+    questionTags.json    # 900 题的章节标签（scripts/tag-questions.mjs 关键词+细目点名匹配）
+    lessons.json         # 21 篇章节讲义正文（正文为提炼编写，细目点清单用官方原文渲染）
   lib/
     api.ts               # Tauri invoke 封装；isTauri() 为 false 时全部走浏览器 mock；Store 数据模型类型
     store.ts             # zustand + persist 全局状态（localStorage "atp.store.v1"，信封格式）；写状态必须走 action

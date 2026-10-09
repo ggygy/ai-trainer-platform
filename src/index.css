@@ -51,3 +51,15 @@ body {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* 可点击元素显示手型光标（Tailwind v4 preflight 不再代劳，浏览器对 button 默认是箭头） */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+select,
+label:has(input[type="checkbox"]),
+label:has(input[type="radio"]) {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}

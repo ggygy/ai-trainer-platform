@@ -241,7 +241,11 @@ export const QUESTION_TAGS = tagsRaw as unknown as {
   multi: Record<string, string>;
 };
 
-const theoryBank = theoryRaw as unknown as { single: { id: number; stem: string; options: [string, string][] }[] };
+const theoryBank = theoryRaw as unknown as {
+  judge: { id: number; stem: string }[];
+  single: { id: number; stem: string; options: [string, string][] }[];
+  multi: { id: number; stem: string; options: [string, string][] }[];
+};
 
 export type Lesson = {
   code: string; // 章节代码 "3.1.1"
@@ -259,14 +263,46 @@ const lessonData = lessonsRaw as unknown as {
   lessons: Record<string, { title: string; body: string; keyPoints: string[] }>;
 };
 
-/** 章节配套例题：本章已打标的单选题，不足 4 道时按「同单元 → 同大项」回补（真题数量少的章节） */
-export function lessonQuizIds(code: string, n = 4): number[] {
-  const inChapter = theoryBank.single.filter((q) => QUESTION_TAGS.single[String(q.id)] === code).map((q) => q.id);
-  const unitPrefix = code.split(".").slice(0, 2).join(".");
-  const sameUnit = theoryBank.single.filter((q) => QUESTION_TAGS.single[String(q.id)]?.startsWith(unitPrefix + ".")).map((q) => q.id);
-  const sameDomain = theoryBank.single.filter((q) => QUESTION_TAGS.single[String(q.id)]?.startsWith(code[0] + ".")).map((q) => q.id);
-  const merged = [...new Set([...inChapter, ...sameUnit, ...sameDomain])].sort((a, b) => a - b);
-  return merged.slice(0, n);
+/** 章节例题池 = 全量题库 900 题：本章打标真题按「单选/判断/多选」交错排最前，其余题目交错续后 */
+export type QuizQuestion = { type: "judge" | "single" | "multi"; id: number };
+
+export function chapterTaggedCount(code: string): number {
+  let n = 0;
+  for (const type of ["judge", "single", "multi"] as const)
+    for (const t of Object.values(QUESTION_TAGS[type])) if (t === code) n++;
+  return n;
+}
+
+export function lessonQuiz(code: string): QuizQuestion[] {
+  const pools: Record<"judge" | "single" | "multi", { chapter: number[]; rest: number[] }> = {
+    judge: { chapter: [], rest: [] },
+    single: { chapter: [], rest: [] },
+    multi: { chapter: [], rest: [] },
+  };
+  for (const type of ["judge", "single", "multi"] as const)
+    for (const q of theoryBank[type])
+      (QUESTION_TAGS[type][String(q.id)] === code ? pools[type].chapter : pools[type].rest).push(q.id);
+
+  const roundRobin = (p: Record<"judge" | "single" | "multi", number[]>) => {
+    const out: QuizQuestion[] = [];
+    for (let i = 0; ; i++) {
+      let any = false;
+      for (const type of ["single", "judge", "multi"] as const) {
+        const id = p[type][i];
+        if (id !== undefined) {
+          out.push({ type, id });
+          any = true;
+        }
+      }
+      if (!any) return out;
+    }
+  };
+  const chapterPart = roundRobin({ judge: pools.judge.chapter, single: pools.single.chapter, multi: pools.multi.chapter });
+  const used = new Set(chapterPart.map((q) => q.type + q.id));
+  const restPart = roundRobin({ judge: pools.judge.rest, single: pools.single.rest, multi: pools.multi.rest }).filter(
+    (q) => !used.has(q.type + q.id)
+  );
+  return [...chapterPart, ...restPart];
 }
 
 export const LESSON_SOURCE_NOTE = "本讲义依据官方《认定要素细目表》细目点与真题提炼编写（非官方教材原文）；下方细目点清单为官方原文。";
@@ -277,7 +313,7 @@ for (const d of SYLLABUS.domains)
   for (const c of d.chapters) {
     const l = lessonData.lessons[c.code];
     if (!l) throw new Error(`章节 ${c.code} 缺少课程内容（lessons.json）`);
-    const quizN = lessonQuizIds(c.code).length;
+    const taggedN = chapterTaggedCount(c.code);
     LESSONS[c.code] = {
       code: c.code,
       unit: c.unit,
@@ -286,7 +322,7 @@ for (const d of SYLLABUS.domains)
       pointCount: c.points.length,
       body: l.body,
       keyPoints: l.keyPoints,
-      tags: [`官方分值 ${c.score} 分`, `细目点 ${c.points.length} 个`, `配套例题 ${quizN} 道`, `所属大项 · ${d.name}`],
+      tags: [`官方分值 ${c.score} 分`, `细目点 ${c.points.length} 个`, `本章真题 ${taggedN} 道 · 全库可刷`, `所属大项 · ${d.name}`],
     };
   }
 
@@ -296,7 +332,7 @@ export type KnowledgeNode = {
   name: string;
   level: 1 | 2;
   score: number; // 官方分值
-  quizCount?: number; // level2：配套例题数
+  taggedCount?: number; // level2：本章打标真题数
   pointCount?: number;
 };
 export const KNOWLEDGE_TREE: KnowledgeNode[] = SYLLABUS.domains.flatMap((d) => [
@@ -307,7 +343,7 @@ export const KNOWLEDGE_TREE: KnowledgeNode[] = SYLLABUS.domains.flatMap((d) => [
     name: c.name,
     level: 2 as const,
     score: c.score,
-    quizCount: lessonQuizIds(c.code).length,
+    taggedCount: chapterTaggedCount(c.code),
     pointCount: c.points.length,
   })),
 ]);

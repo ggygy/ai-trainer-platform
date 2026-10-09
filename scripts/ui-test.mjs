@@ -125,20 +125,40 @@ async function run() {
     await see("浏览器预览模式");
   });
 
-  // T7 理论学习：章节切换 + 例题轮换 + 判分反馈 + 掌握标记持久化
-  await step("T7 理论学习：切章→例题轮换→选项判分→标记已掌握持久化", async () => {
+  // T7 理论学习：全库 900 题例题池（3.1.1 首三题固定为 单选 s70 → 判断 j153 → 多选 m70）
+  await step("T7 理论学习：900 题池→单选/判断/多选判分→掌握标记持久化", async () => {
     await nav("理论学习").click();
     await see("配套例题");
-    await see("例题 1/4");
-    await page.getByRole("button", { name: "下一题" }).click();
-    await see("例题 2/4");
-    await page.locator("div.bg-surface.border", { hasText: "配套例题" }).locator("button").last().click();
+    await see("例题 1/900");
+    const card = page.locator("div.bg-surface.border", { hasText: "配套例题" });
+    // 第 1 题单选 s70：点最后一个选项按钮判分
+    await card.locator("button").last().click();
     await see("正确答案");
     await page.getByRole("button", { name: "标记已掌握" }).click();
     await page.waitForTimeout(200);
-    const s = await store();
+    let s = await store();
     assert.equal(s.mastered?.["3.1.1"], true, "mastered[3.1.1] 应为 true");
-    assert.ok(Object.keys(s.theoryDone ?? {}).length > 0, "例题作答应计入 theoryDone");
+    assert.ok(s.theoryDone?.["s70"], `单选作答应计入 theoryDone[s70]，实际 ${JSON.stringify(s.theoryDone ?? {})}`);
+    // 第 2 题判断 j153：正确/错误 两按钮
+    await page.getByRole("button", { name: "下一题" }).click();
+    await see("例题 2/900");
+    await page.getByRole("button", { name: "正确" }).click();
+    await see("正确答案");
+    // 第 3 题多选 m70：勾选一个选项后提交
+    await page.getByRole("button", { name: "下一题" }).click();
+    await see("例题 3/900");
+    await card.locator("button").filter({ hasText: /^A/ }).first().click(); // 勾选选项 A
+    await page.getByRole("button", { name: "提交答案" }).click();
+    await see("正确答案");
+    // 第 4 题起继续轮换
+    await page.getByRole("button", { name: "下一题" }).click();
+    await see("例题 4/900");
+    s = await store();
+    assert.ok(s.theoryDone?.["j153"], `判断作答应计入 theoryDone[j153]`);
+    assert.ok(s.theoryDone?.["m70"], `多选作答应计入 theoryDone[m70]`);
+    const wrongKeys = (s.wrongBook ?? []).map((w) => w.id);
+    // 错题本键家族：刷题/练习 j|s|m+题库id，官方全真卷 oj|os|om+卷内序号
+    assert.ok(wrongKeys.every((k) => /^[ojsm]{1,2}\d+$/.test(k)), `错题本键格式异常，实际 ${JSON.stringify(wrongKeys.slice(0, 8))}…`);
   });
 
   // T8 成绩报告：导出下载 + 跳转按钮

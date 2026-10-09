@@ -1,44 +1,69 @@
 import { useRef, useState } from "react";
 import { BookOpen, ChevronDown, CircleCheck, CircleX, ListTree, Sparkles } from "lucide-react";
 import { Card, Badge, Btn, Chip, Ghost, PageHead } from "../components/ui";
-import { KNOWLEDGE_TREE, LESSONS, LESSON_SOURCE_NOTE, SYLLABUS, lessonQuizIds, type Lesson } from "../data/content";
+import { KNOWLEDGE_TREE, LESSONS, LESSON_SOURCE_NOTE, SYLLABUS, lessonQuiz, type Lesson, type QuizQuestion } from "../data/content";
 import theory from "../data/theory.json";
 import { aiKey } from "../lib/answers";
 import { useStore } from "../lib/store";
 
-const singleBank = (theory as unknown as { single: { id: number; stem: string; options: [string, string][] }[] }).single;
+const bank = theory as unknown as {
+  judge: { id: number; stem: string }[];
+  single: { id: number; stem: string; options: [string, string][] }[];
+  multi: { id: number; stem: string; options: [string, string][] }[];
+};
+const TYPE_LABEL = { judge: "判断", single: "单选", multi: "多选" } as const;
 
 export default function TheoryLearn() {
   const [sel, setSel] = useState("3.1.1"); // 默认打开最高权重单元（3.1 共 18 分）的第一章
   const lesson = LESSONS[sel];
   const [quizIdx, setQuizIdx] = useState(0);
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(null); // 判断/单选的选择
+  const [pickedMulti, setPickedMulti] = useState<string[]>([]); // 多选勾选
+  const [multiSubmitted, setMultiSubmitted] = useState(false);
   const quizRef = useRef<HTMLDivElement>(null);
-  const quizIds = lessonQuizIds(sel);
-  const quizId = quizIds[quizIdx % quizIds.length];
-  const quiz = singleBank.find((q) => q.id === quizId)!;
+  const quizPool = lessonQuiz(sel); // 全量题库 900 题，本章打标真题交错排最前
+  const q: QuizQuestion = quizPool[quizIdx % quizPool.length];
+  const item = bank[q.type].find((x) => x.id === q.id)!;
   const mastered = useStore((s) => !!s.mastered?.[sel]);
+
+  const resetQuizState = () => {
+    setPicked(null);
+    setPickedMulti([]);
+    setMultiSubmitted(false);
+  };
 
   const select = (id: string) => {
     if (id === sel) return;
     setSel(id);
     setQuizIdx(0);
-    setPicked(null);
+    resetQuizState();
   };
 
   const toggleMastered = () => useStore.getState().toggleMastered(sel);
 
   // 作答即计入刷题统计；答错写入错题本（与文案承诺一致）
-  const answerQuiz = (letter: string) => {
+  const reveal = (isWrong: boolean) => {
+    useStore.getState().recordQuizAnswer(`${q.type[0]}${q.id}`, isWrong, item.stem, TYPE_LABEL[q.type]);
+  };
+  const pickSingle = (letter: string) => {
     if (picked !== null) return;
     setPicked(letter);
-    const right = aiKey.single[String(quizId)]?.a;
-    useStore.getState().recordQuizAnswer(`s${quizId}`, letter !== right, quiz.stem);
+    const right = aiKey[q.type === "judge" ? "judge" : "single"][String(q.id)]?.a;
+    reveal(letter !== right);
+  };
+  const toggleMulti = (letter: string) => {
+    if (multiSubmitted) return;
+    setPickedMulti((cur) => (cur.includes(letter) ? cur.filter((x) => x !== letter) : [...cur, letter].sort()));
+  };
+  const submitMulti = () => {
+    if (multiSubmitted || pickedMulti.length === 0) return;
+    setMultiSubmitted(true);
+    reveal(pickedMulti.join("") !== aiKey.multi[String(q.id)]?.a);
   };
 
   const nextQuiz = () => {
-    setQuizIdx((i) => (i + 1) % quizIds.length);
-    setPicked(null);
+    setQuizIdx((i) => (i + 1) % quizPool.length);
+    resetQuizState();
   };
 
   return (
@@ -61,7 +86,20 @@ export default function TheoryLearn() {
         <div className="flex-1 flex flex-col gap-4 min-w-0 overflow-y-auto pb-2">
           <LessonCard lesson={lesson} />
           <SyllabusPoints code={sel} />
-          <QuizCard quizRef={quizRef} quiz={quiz} quizIdx={quizIdx} total={quizIds.length} picked={picked} onPick={answerQuiz} onNext={nextQuiz} />
+          <QuizCard
+            quizRef={quizRef}
+            type={q.type}
+            item={item}
+            idx={quizIdx}
+            total={quizPool.length}
+            picked={picked}
+            pickedMulti={pickedMulti}
+            multiSubmitted={multiSubmitted}
+            onPickSingle={pickSingle}
+            onToggleMulti={toggleMulti}
+            onSubmitMulti={submitMulti}
+            onNext={nextQuiz}
+          />
           <div className="text-[11px] text-ink3 leading-relaxed flex items-start gap-1.5">
             <Sparkles size={13} className="mt-0.5 shrink-0" />
             {LESSON_SOURCE_NOTE}
@@ -175,45 +213,63 @@ function SyllabusPoints({ code }: { code: string }) {
 
 function QuizCard({
   quizRef,
-  quiz,
-  quizIdx,
+  type,
+  item,
+  idx,
   total,
   picked,
-  onPick,
+  pickedMulti,
+  multiSubmitted,
+  onPickSingle,
+  onToggleMulti,
+  onSubmitMulti,
   onNext,
 }: {
   quizRef: React.RefObject<HTMLDivElement | null>;
-  quiz: { id: number; stem: string; options: [string, string][] };
-  quizIdx: number;
+  type: QuizQuestion["type"];
+  item: { id: number; stem: string; options?: [string, string][] };
+  idx: number;
   total: number;
   picked: string | null;
-  onPick: (letter: string) => void;
+  pickedMulti: string[];
+  multiSubmitted: boolean;
+  onPickSingle: (letter: string) => void;
+  onToggleMulti: (letter: string) => void;
+  onSubmitMulti: () => void;
   onNext: () => void;
 }) {
-  const right = aiKey.single[String(quiz.id)]?.a;
-  const revealed = picked !== null;
+  const right = aiKey[type][String(item.id)]?.a;
+  // 判断题映射成 √/× 两个「选项」；单选/多选用题库自带选项
+  const options: [string, string][] =
+    type === "judge" ? ([["√", "正确"], ["×", "错误"]] as [string, string][]) : (item.options ?? []);
+  const revealed = type === "multi" ? multiSubmitted : picked !== null;
+  const isRight = (letter: string) => (type === "multi" ? !!right?.includes(letter) : right === letter);
   return (
     <Card>
       <div ref={quizRef} className="flex items-center justify-between mb-3 scroll-mt-3">
         <div className="flex items-center gap-2.5">
-          <span className="text-[15px] font-semibold text-ink1">配套例题 · 本章真题</span>
+          <span className="text-[15px] font-semibold text-ink1">配套例题</span>
+          <span className="px-2.5 py-1 rounded-full text-xs bg-surface2 text-ink2">{TYPE_LABEL[type]}</span>
           <Badge tone="accent" dot={false}>
-            例题 {(quizIdx % total) + 1}/{total}
+            例题 {idx + 1}/{total}
           </Badge>
         </div>
         <Ghost onClick={onNext}>下一题</Ghost>
       </div>
-      <div className="text-[13px] font-medium leading-relaxed text-ink1 mb-3 selectable">{quiz.stem}</div>
+      <div className="text-[13px] font-medium leading-relaxed text-ink1 mb-3 selectable">
+        {type === "judge" && <span className="text-ink3">（判断对错）</span>}
+        {type === "multi" && <span className="text-ink3">（多选，勾选后提交）</span>}
+        {item.stem}
+      </div>
       <div className="flex flex-col gap-2">
-        {quiz.options.map(([letter, text]) => {
-          const on = picked === letter;
-          const isRight = right === letter;
+        {options.map(([letter, text]) => {
+          const on = type === "multi" ? pickedMulti.includes(letter) : picked === letter;
           return (
             <button
               key={letter}
-              onClick={() => onPick(letter)}
+              onClick={() => (type === "multi" ? onToggleMulti(letter) : onPickSingle(letter))}
               className={`flex items-center gap-3 px-4 py-2.5 rounded-[10px] border text-left ${
-                revealed && isRight
+                revealed && isRight(letter)
                   ? "bg-ok-soft border-ok"
                   : on
                     ? "bg-accent-soft border-accent"
@@ -222,27 +278,36 @@ function QuizCard({
             >
               <span
                 className={`w-[26px] h-[26px] rounded-full flex items-center justify-center text-xs shrink-0 ${
-                  revealed && isRight ? "bg-ok text-white" : on ? "bg-accent text-white" : "bg-surface2 text-ink2"
+                  revealed && isRight(letter) ? "bg-ok text-white" : on ? "bg-accent text-white" : "bg-surface2 text-ink2"
                 }`}
               >
                 {letter}
               </span>
-              <span className={`text-[13px] ${on || (revealed && isRight) ? "font-medium text-ink1" : "text-ink1"}`}>{text}</span>
-              {revealed && isRight && <CircleCheck size={15} className="ml-auto text-ok shrink-0" />}
-              {on && !isRight && <CircleX size={15} className="ml-auto text-bad shrink-0" />}
+              <span className="text-[13px] text-ink1">{text}</span>
+              {revealed && isRight(letter) && <CircleCheck size={15} className="ml-auto text-ok shrink-0" />}
+              {revealed && on && !isRight(letter) && <CircleX size={15} className="ml-auto text-bad shrink-0" />}
             </button>
           );
         })}
       </div>
+      {type === "multi" && !multiSubmitted && (
+        <div className="mt-3">
+          <Btn primary onClick={onSubmitMulti}>
+            提交答案
+          </Btn>
+        </div>
+      )}
       {revealed && (
         <div className="mt-3 text-xs text-ink2">
           正确答案：<b className="text-ok">{right}</b>
-          {picked !== right && <span className="text-bad"> · 本题已自动加入错题强化（可点「下一题」继续）</span>}
+          {(type === "multi" ? pickedMulti.join("") !== right : picked !== right) && (
+            <span className="text-bad"> · 本题已自动加入错题强化（可点「下一题」继续）</span>
+          )}
         </div>
       )}
       <div className="mt-3 text-[11px] text-ink3 flex items-center gap-1.5">
         <BookOpen size={12} />
-        例题取自本章打标真题；本章真题不足 4 道时自动回补同单元真题。
+        例题池为全量题库 {total} 题：本章打标真题交错排在最前，其余题目随后续刷。
       </div>
     </Card>
   );

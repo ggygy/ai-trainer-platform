@@ -14,8 +14,8 @@ type Actions = {
   /** 导入答案：全真卷连续编号拆节（√/×→判断 1-40，字母 41-180→单选-40，≥181→多选-180） */
   importAnswers: (parsed: Record<string, string>) => void;
   clearAnswers: () => void;
-  /** 理论学习例题作答：计入刷题统计；答错写入错题本 */
-  recordQuizAnswer: (qKey: string, isWrong: boolean, stem: string) => void;
+  /** 理论学习例题作答：计入刷题统计；答错写入错题本（typeLabel：单选/判断/多选） */
+  recordQuizAnswer: (qKey: string, isWrong: boolean, stem: string, typeLabel: string) => void;
   toggleMastered: (id: string) => void;
   markPracticeDone: (key: string) => void;
   setMaterialDir: (dir: string) => void;
@@ -87,13 +87,13 @@ export const useStore = create<Store & Actions>()(
 
       clearAnswers: () => set({ answerKey: { judge: {}, single: {}, multi: {} } }),
 
-      recordQuizAnswer: (qKey, isWrong, stem) =>
+      recordQuizAnswer: (qKey, isWrong, stem, typeLabel) =>
         set((s) => {
           const exists = s.wrongBook.some((w) => w.id === qKey);
           const wrongBook = isWrong
             ? exists
               ? s.wrongBook.map((w) => (w.id === qKey ? { ...w, count: w.count + 1 } : w))
-              : [...s.wrongBook, { id: qKey, type: "单选", text: stem.slice(0, 40), count: 1 }]
+              : [...s.wrongBook, { id: qKey, type: typeLabel, text: stem.slice(0, 40), count: 1 }]
             : s.wrongBook;
           return { theoryDone: { ...s.theoryDone, [qKey]: today() }, wrongBook };
         }),

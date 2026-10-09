@@ -42,18 +42,27 @@ jobs:
         id: tag
         run: echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
+      - name: 生成发布说明
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          {
+            echo "自动构建 · 提交 ${{ github.sha }}"
+            echo
+            echo "$COMMIT_MSG"
+            echo
+            echo "---"
+            echo "- 安装包：未签名 arm64 .dmg，下载后首次打开需「右键 → 打开」绕过 Gatekeeper"
+            echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
+          } > release-notes.md
+
       - name: 发布到 Release assets
-        uses: softprops/action-ghrelease@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: 训练师备考平台 ${{ steps.tag.outputs.tag }}
-          body: |
-            自动构建 · 提交 ${{ github.sha }}
-
-            ${{ github.event.head_commit.message }}
-
-            ---
-            - 安装包：未签名 arm64 .dmg，下载后首次打开需「右键 → 打开」绕过 Gatekeeper
-            - 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据
-          prerelease: true
-          files: src-tauri/target/release/bundle/dmg/*.dmg
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --prerelease \
+            --title "训练师备考平台 $TAG" \
+            --notes-file release-notes.md \
+            src-tauri/target/release/bundle/dmg/*.dmg

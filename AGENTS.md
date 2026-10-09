@@ -33,13 +33,16 @@ src/
     practicalAnswers.json# 实操 40 题官方参考答案，键 "2.2.1"；3.2.5 官方暂缺
     content.ts           # 题组/依赖清单/知识树/课程/文案常量
   lib/
-    api.ts               # Tauri invoke 封装；isTauri() 为 false 时全部走浏览器 mock；Store/localStorage("atp.store.v1")
-    answers.ts           # 答案源合并：用户导入 > AI 参考（refAnswer）
+    api.ts               # Tauri invoke 封装；isTauri() 为 false 时全部走浏览器 mock；Store 数据模型类型
+    store.ts             # zustand + persist 全局状态（localStorage "atp.store.v1"，信封格式）；写状态必须走 action
+    answers.ts           # 答案源合并：用户导入 > AI 参考（refAnswer，纯函数）
   pages/                 # 7 个页面组件；深链接 ?page=<id>&paper=official&group=2.2&idx=0&ref=1
   components/            # ui.tsx 基础件、exam-ui.tsx 考试件、Sidebar
-src-tauri/src/commands/  # env.rs 环境检测/安装（zsh -lc 解析 GUI PATH；PEP 668 失败自动加 --break-system-packages）
-                         # jupyter.rs 子进程起停（端口 8889，stderr 流式解析 token）
+src-tauri/src/commands/  # mod.rs 平台原语（shell_command：mac=zsh 登录壳 / win=cmd /C + CREATE_NO_WINDOW）
+                         # env.rs 环境检测/安装（Python 候选探测：mac=python3，win=python→py -3；PEP 668 失败自动加 --break-system-packages）
+                         # jupyter.rs 子进程起停（端口 8889，stderr 流式解析 token；win 停止用 taskkill /T 杀进程树）
 scripts/ui-test.mjs      # E2E 测试（选择器若因 UI 改动失效需同步更新）
+scripts/mock-full.mjs    # 全真模考完整回归（190 题全卷）
 ```
 
 ## 架构决策记录（ADR）
@@ -60,7 +63,8 @@ scripts/ui-test.mjs      # E2E 测试（选择器若因 UI 改动失效需同步
 
 ## 约定与坑
 
-- **React.StrictMode 下 effect 会跑两遍**：任何写 localStorage / 发请求的 mount-effect 必须加 ref 守卫（见 TheoryExam ResultScreen）。
+- **React.StrictMode 下 effect 会跑两遍**：任何写状态 / 发请求的 mount-effect 必须加 ref 守卫（见 TheoryExam ResultScreen）；zustand 不解决双跑，守卫仍必需。
+- **状态读写只走 `lib/store.ts`**：组件用 `useStore()` 订阅、`useStore.getState().action()` 写入，禁止直接读写 localStorage；E2E 读 localStorage 时注意 persist 信封（`parsed.state ?? parsed`）。
 - **不要嵌套 button**（Btn 里再套 button 会触发 React DOM 告警），卡片可点击区域用 div + onClick。
 - **TS 严格模式 + noUnusedLocals**：未使用的 import 会直接构建失败；theory.json 需要 `as unknown as` 类型断言（JSON 推导出 string[][]）。
 - **样式只用 index.css @theme 里的 token**（bg/surface/ink1-3/accent/ok/warn/bad 及 -soft 变体、radius-card），不要硬编码色值（inkwell 深色终端区除外）。

@@ -12,6 +12,8 @@
 | [0006](0006-query-param-routing.md) | 页面路由用 query 深链接参数，不引入路由库 | 已接受 | 2026-10-09 |
 | [0007](0007-playwright-core-system-edge.md) | E2E 测试用 playwright-core 驱动系统 Edge 无头 | 已接受 | 2026-10-09 |
 | [0008](0008-pip-break-system-packages.md) | pip 安装遇 PEP 668 受管环境自动降级 `--break-system-packages` | 已接受 | 2026-10-08 |
+| [0009](0009-zustand-state.md) | 状态管理迁移 zustand persist（key/介质不变，信封格式迁移） | 已接受 | 2026-10-09 |
+| [0010](0010-windows-platform.md) | Windows 支持：cmd/注册表 PATH + NSIS + taskkill 进程树 | 已接受 | 2026-10-09 |
 
 ## 新增 ADR 的约定
 

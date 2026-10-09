@@ -5,6 +5,7 @@ import { KNOWLEDGE_TREE, LESSONS, LESSON_SOURCE_NOTE, SYLLABUS, lessonQuiz, type
 import theory from "../data/theory.json";
 import { aiKey } from "../lib/answers";
 import { useStore } from "../lib/store";
+import type { PageId } from "../components/Sidebar";
 
 const bank = theory as unknown as {
   judge: { id: number; stem: string }[];
@@ -13,7 +14,7 @@ const bank = theory as unknown as {
 };
 const TYPE_LABEL = { judge: "判断", single: "单选", multi: "多选" } as const;
 
-export default function TheoryLearn() {
+export default function TheoryLearn({ go }: { go: (p: PageId) => void }) {
   const [sel, setSel] = useState("3.1.1"); // 默认打开最高权重单元（3.1 共 18 分）的第一章
   const lesson = LESSONS[sel];
   const [quizIdx, setQuizIdx] = useState(0);
@@ -21,10 +22,12 @@ export default function TheoryLearn() {
   const [pickedMulti, setPickedMulti] = useState<string[]>([]); // 多选勾选
   const [multiSubmitted, setMultiSubmitted] = useState(false);
   const quizRef = useRef<HTMLDivElement>(null);
-  const quizPool = lessonQuiz(sel); // 全量题库 900 题，本章打标真题交错排最前
+  const quizPool = lessonQuiz(sel); // 仅本章打标真题，单选/判断/多选交错
   const q: QuizQuestion = quizPool[quizIdx % quizPool.length];
   const item = bank[q.type].find((x) => x.id === q.id)!;
   const mastered = useStore((s) => !!s.mastered?.[sel]);
+  const doneMap = useStore((s) => s.theoryDone);
+  const chapterFinished = quizPool.every((x) => doneMap?.[`${x.type[0]}${x.id}`]);
 
   const resetQuizState = () => {
     setPicked(null);
@@ -86,6 +89,13 @@ export default function TheoryLearn() {
         <div className="flex-1 flex flex-col gap-4 min-w-0 overflow-y-auto pb-2">
           <LessonCard lesson={lesson} />
           <SyllabusPoints code={sel} />
+          {chapterFinished && (
+            <div className="flex items-center gap-3 px-4 py-3 rounded-[12px] border border-ok bg-ok-soft">
+              <CircleCheck size={16} className="text-ok shrink-0" />
+              <span className="text-xs text-ink2 flex-1">本章 {quizPool.length} 道真题已全部刷过，可继续轮刷，或去全库练习（含未打标题）。</span>
+              <Btn onClick={() => go("exam")}>去全库刷题</Btn>
+            </div>
+          )}
           <QuizCard
             quizRef={quizRef}
             type={q.type}
@@ -156,6 +166,9 @@ function KnowledgeTree({ sel, onSelect }: { sel: string; onSelect: (id: string) 
 }
 
 function LessonCard({ lesson }: { lesson: Lesson }) {
+  const paragraphs = lesson.body.split("\n\n");
+  const [open, setOpen] = useState(false);
+  const long = paragraphs.length > 5; // 长讲义默认收起前 5 段，避免淹没页面
   return (
     <Card>
       <div className="flex flex-wrap gap-2 mb-3.5">
@@ -163,11 +176,19 @@ function LessonCard({ lesson }: { lesson: Lesson }) {
           <Chip key={t}>{t}</Chip>
         ))}
       </div>
-      {lesson.body.split("\n\n").map((p, i) => (
-        <p key={i} className="text-[13px] leading-relaxed text-ink2 selectable mb-3 last:mb-0">
-          {p}
-        </p>
-      ))}
+      <div className={`flex flex-col ${long && !open ? "max-h-[420px] overflow-hidden relative" : ""}`}>
+        {paragraphs.map((p, i) => (
+          <p key={i} className="text-[13px] leading-relaxed text-ink2 selectable mb-3 last:mb-0">
+            {p}
+          </p>
+        ))}
+        {long && !open && <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-surface to-transparent" />}
+      </div>
+      {long && (
+        <div className="flex justify-end -mt-1 mb-1">
+          <Ghost onClick={() => setOpen((v) => !v)}>{open ? "收起讲义" : "展开全部讲义"}</Ghost>
+        </div>
+      )}
       <div className="rounded-[10px] bg-accent-soft p-3.5 mt-3.5">
         <div className="text-xs font-semibold text-accent-deep mb-2">考试要点</div>
         <div className="flex flex-col gap-1.5">
@@ -307,7 +328,7 @@ function QuizCard({
       )}
       <div className="mt-3 text-[11px] text-ink3 flex items-center gap-1.5">
         <BookOpen size={12} />
-        例题池为全量题库 {total} 题：本章打标真题交错排最前，其余题目按章序洗牌续刷（不同章节顺序不同）。
+        例题为 本章打标真题（共 {total} 道，单选/判断/多选交错）；全库 900 题请到「模拟考试」刷题。
       </div>
     </Card>
   );

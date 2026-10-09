@@ -125,11 +125,11 @@ async function run() {
     await see("浏览器预览模式");
   });
 
-  // T7 理论学习：全库 900 题例题池（3.1.1 首三题固定为 单选 s70 → 判断 j153 → 多选 m70）
-  await step("T7 理论学习：900 题池→单选/判断/多选判分→掌握标记持久化", async () => {
+  // T7 理论学习：本章例题池（3.1.1 共 41 道，首三题固定为 单选 s70 → 判断 j153 → 多选 m70）
+  await step("T7 理论学习：本章真题池→单选/判断/多选判分→掌握标记持久化", async () => {
     await nav("理论学习").click();
     await see("配套例题");
-    await see("例题 1/900");
+    await see("例题 1/41");
     const card = page.locator("div.bg-surface.border", { hasText: "配套例题" });
     // 第 1 题单选 s70：点最后一个选项按钮判分
     await card.locator("button").last().click();
@@ -141,18 +141,18 @@ async function run() {
     assert.ok(s.theoryDone?.["s70"], `单选作答应计入 theoryDone[s70]，实际 ${JSON.stringify(s.theoryDone ?? {})}`);
     // 第 2 题判断 j153：正确/错误 两按钮
     await page.getByRole("button", { name: "下一题" }).click();
-    await see("例题 2/900");
+    await see("例题 2/41");
     await page.getByRole("button", { name: "正确" }).click();
     await see("正确答案");
     // 第 3 题多选 m70：勾选一个选项后提交
     await page.getByRole("button", { name: "下一题" }).click();
-    await see("例题 3/900");
+    await see("例题 3/41");
     await card.locator("button").filter({ hasText: /^A/ }).first().click(); // 勾选选项 A
     await page.getByRole("button", { name: "提交答案" }).click();
     await see("正确答案");
     // 第 4 题起继续轮换
     await page.getByRole("button", { name: "下一题" }).click();
-    await see("例题 4/900");
+    await see("例题 4/41");
     s = await store();
     assert.ok(s.theoryDone?.["j153"], `判断作答应计入 theoryDone[j153]`);
     assert.ok(s.theoryDone?.["m70"], `多选作答应计入 theoryDone[m70]`);

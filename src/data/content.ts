@@ -263,7 +263,7 @@ const lessonData = lessonsRaw as unknown as {
   lessons: Record<string, { title: string; body: string; keyPoints: string[] }>;
 };
 
-/** 章节例题池 = 全量题库 900 题：本章打标真题按「单选/判断/多选」交错排最前，其余题目交错续后 */
+/** 章节例题池 = 仅本章打标真题：单选/判断/多选交错、确定性排序 */
 export type QuizQuestion = { type: "judge" | "single" | "multi"; id: number };
 
 export function chapterTaggedCount(code: string): number {
@@ -273,60 +273,24 @@ export function chapterTaggedCount(code: string): number {
   return n;
 }
 
-/** 章节种子确定性洗牌：同一章每次进入顺序一致，不同章节互不相同（不用 Math.random，便于测试与续刷） */
-function seededShuffle<T>(arr: T[], seed: string): T[] {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  const rand = () => {
-    h = (h + 0x6d2b79f5) | 0;
-    let t = Math.imul(h ^ (h >>> 15), 1 | h);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  const out = [...arr];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
-}
-
 export function lessonQuiz(code: string): QuizQuestion[] {
-  const pools: Record<"judge" | "single" | "multi", { chapter: number[]; rest: number[] }> = {
-    judge: { chapter: [], rest: [] },
-    single: { chapter: [], rest: [] },
-    multi: { chapter: [], rest: [] },
-  };
+  const pools: Record<"judge" | "single" | "multi", number[]> = { judge: [], single: [], multi: [] };
   for (const type of ["judge", "single", "multi"] as const)
-    for (const q of theoryBank[type])
-      (QUESTION_TAGS[type][String(q.id)] === code ? pools[type].chapter : pools[type].rest).push(q.id);
+    for (const q of theoryBank[type]) if (QUESTION_TAGS[type][String(q.id)] === code) pools[type].push(q.id);
 
-  const roundRobin = (p: Record<"judge" | "single" | "multi", number[]>) => {
-    const out: QuizQuestion[] = [];
-    for (let i = 0; ; i++) {
-      let any = false;
-      for (const type of ["single", "judge", "multi"] as const) {
-        const id = p[type][i];
-        if (id !== undefined) {
-          out.push({ type, id });
-          any = true;
-        }
+  // 三类题型交错出现（单选→判断→多选），顺序稳定可复现
+  const out: QuizQuestion[] = [];
+  for (let i = 0; ; i++) {
+    let any = false;
+    for (const type of ["single", "judge", "multi"] as const) {
+      const id = pools[type][i];
+      if (id !== undefined) {
+        out.push({ type, id });
+        any = true;
       }
-      if (!any) return out;
     }
-  };
-  // 本章打标真题保持稳定交错序；其余全库题目按章节种子洗牌——每个章节的刷题顺序各不相同
-  const chapterPart = roundRobin({ judge: pools.judge.chapter, single: pools.single.chapter, multi: pools.multi.chapter });
-  const used = new Set(chapterPart.map((q) => q.type + q.id));
-  const restPart = roundRobin({
-    judge: seededShuffle(pools.judge.rest, code),
-    single: seededShuffle(pools.single.rest, code),
-    multi: seededShuffle(pools.multi.rest, code),
-  }).filter((q) => !used.has(q.type + q.id));
-  return [...chapterPart, ...restPart];
+    if (!any) return out;
+  }
 }
 
 export const LESSON_SOURCE_NOTE = "本讲义依据官方《认定要素细目表》细目点与真题提炼编写（非官方教材原文）；下方细目点清单为官方原文。";
@@ -346,7 +310,7 @@ for (const d of SYLLABUS.domains)
       pointCount: c.points.length,
       body: l.body,
       keyPoints: l.keyPoints,
-      tags: [`官方分值 ${c.score} 分`, `细目点 ${c.points.length} 个`, `本章真题 ${taggedN} 道 · 全库可刷`, `所属大项 · ${d.name}`],
+      tags: [`官方分值 ${c.score} 分`, `细目点 ${c.points.length} 个`, `本章真题 ${taggedN} 道`, `所属大项 · ${d.name}`],
     };
   }
 

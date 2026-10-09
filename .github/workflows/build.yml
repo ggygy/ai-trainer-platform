@@ -67,7 +67,7 @@ jobs:
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
           } > release-notes.md
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --prerelease --title "训练师备考平台 $TAG" --notes-file release-notes.md || true
+            gh release create "$TAG" --prerelease --title "AI Trainer Prep $TAG" --notes-file release-notes.md || true
           gh release upload "$TAG" release/*.dmg release/checksums-mac.txt --clobber
 
   build-windows:
@@ -123,5 +123,5 @@ jobs:
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
           } > release-notes.md
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --prerelease --title "训练师备考平台 $TAG" --notes-file release-notes.md || true
+            gh release create "$TAG" --prerelease --title "AI Trainer Prep $TAG" --notes-file release-notes.md || true
           gh release upload "$TAG" release/*.exe release/checksums-win.txt --clobber

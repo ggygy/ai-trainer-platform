@@ -42,6 +42,13 @@ jobs:
         id: tag
         run: echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
+      - name: 规范化安装包文件名（GitHub assets 不支持非 ASCII 名）
+        run: |
+          mkdir -p release
+          VER=$(node -p "require('./package.json').version")
+          cp src-tauri/target/release/bundle/dmg/*.dmg "release/ai-trainer-platform_${VER}_aarch64.dmg"
+          shasum -a 256 release/*.dmg > release/checksums.txt
+
       - name: 生成发布说明
         env:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
@@ -53,6 +60,7 @@ jobs:
             echo
             echo "---"
             echo "- 安装包：未签名 arm64 .dmg，下载后首次打开需「右键 → 打开」绕过 Gatekeeper"
+            echo "- 完整性：下载后 \`shasum -a 256 -c checksums.txt\` 校验"
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
           } > release-notes.md
 
@@ -65,4 +73,4 @@ jobs:
             --prerelease \
             --title "训练师备考平台 $TAG" \
             --notes-file release-notes.md \
-            src-tauri/target/release/bundle/dmg/*.dmg
+            release/*.dmg release/checksums.txt

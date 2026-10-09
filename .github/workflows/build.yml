@@ -1,0 +1,59 @@
+# 每次推送到 main（或手动触发）：macOS runner 打 Tauri 安装包 → 创建 Release 并挂到 assets
+# 产物：未签名的 arm64 .dmg（首次打开需右键 → 打开，绕过 Gatekeeper）
+name: 构建发布
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      # beforeBuildCommand 会先跑 npm run build（tsc 严格检查），前端类型错误即失败
+      - name: 构建 Tauri 应用
+        run: npm run tauri build
+
+      - name: 计算发布标签（版本-日期-短SHA）
+        id: tag
+        run: echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: 发布到 Release assets
+        uses: softprops/action-ghrelease@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: 训练师备考平台 ${{ steps.tag.outputs.tag }}
+          body: |
+            自动构建 · 提交 ${{ github.sha }}
+
+            ${{ github.event.head_commit.message }}
+
+            ---
+            - 安装包：未签名 arm64 .dmg，下载后首次打开需「右键 → 打开」绕过 Gatekeeper
+            - 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据
+          prerelease: true
+          files: src-tauri/target/release/bundle/dmg/*.dmg

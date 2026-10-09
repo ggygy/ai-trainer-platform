@@ -87,7 +87,7 @@ export type Store = {
   practice: Record<string, { done: boolean; wrong?: boolean; lastAt: string }>;
   history: { date: string; score: number | null; theory: number | null; practical: number | null; minutes: number }[];
   wrongBook: { id: string; type: string; text: string; count: number }[];
-  answerKey: Record<string, Record<string, string>>; // {"single":{"1":"A",...}}
+  answerKey: { judge?: Record<string, string>; single?: Record<string, string>; multi?: Record<string, string> }; // 全真卷连续编号拆节存放（judge/single/multi 各按题型题号）
   mastered: Record<string, boolean>; // 知识点掌握标记 {"k2-2":true}
   materialDir: string;
 };

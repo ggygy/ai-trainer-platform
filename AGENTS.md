@@ -16,6 +16,7 @@ npm run dev            # 仅前端（vite，端口 1420，浏览器可用，Taur
 npm run tauri dev      # 完整桌面应用（首次编译较慢，rsproxy 镜像已配置在 ~/.cargo/config.toml）
 npm run build          # tsc（严格模式）+ vite 生产构建 —— 交付前必跑
 npm run test:ui        # playwright-core + 系统 Edge 无头 E2E（8 场景，需 vite dev 已在 1420 运行）
+npm run test:full      # 全真模考完整回归：导入答案→官方卷 190 题全答→判分 100→落库（同样需 vite dev）
 cd src-tauri && cargo check   # Rust 侧类型检查
 ```
 
@@ -52,6 +53,7 @@ scripts/ui-test.mjs      # E2E 测试（选择器若因 UI 改动失效需同步
 - 真实考试：理论 90 分钟 190 题（140 单选/10 多选/40 判断）；实操 120 分钟 8 题组 40 题抽题；双科 60 分及格。
 - 官方分值权重在 mock190.meta.scores（判断/单选 0.5、多选 1），官方全真卷按此计百分制。
 - 判分优先级：用户粘贴导入（answerKey）> AI 参考答案（aiAnswers）；AI 置信度 low 的判分仅供参考。
+- 答案导入格式是全真卷连续编号 1-190（判断 1-40 填 √/×、单选 41-180、多选 181-190），解析器按区间拆节存入 answerKey.judge/single/multi；官方全真卷判分始终用卷内官方答案，不受导入影响。
 - 实操素材目录：`~/Desktop/codeing/AI/人工智能训练师三级上网素材`（Store.materialDir，可在环境助手更改）。
 - 源资料在上层目录 `../`（题库 docx、认定要素细目表、实操答案 PDF 等），不属于本仓库。
 

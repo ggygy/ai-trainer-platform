@@ -27,12 +27,13 @@ export default function Dashboard({
     { text: "理论多选 10 题 · 业务分析", done: true, tag: "刷题" },
     { text: "复盘错题 10 道 · 智能系统运维", done: false, tag: "错题" },
   ];
-  const bars = [
-    { label: "第 1 次", v: 72 },
-    { label: "第 2 次", v: 75 },
-    { label: "第 3 次", v: 81 },
-    { label: "最新", v: 84, hot: true },
-  ];
+  // 成绩趋势取真实考试历史（最多最近 4 次）；无记录时展示空状态
+  const hist = store.history.slice(-4);
+  const bars = hist.map((h, i) => ({
+    label: i === hist.length - 1 ? "最新" : `第 ${store.history.length - hist.length + i + 1} 次`,
+    v: h.score ?? 0,
+    hot: i === hist.length - 1,
+  }));
 
   return (
     <div className="flex flex-col gap-5 p-7 h-full overflow-y-auto">
@@ -85,18 +86,26 @@ export default function Dashboard({
 
           <Card className="flex-1">
             <CardHead title="模拟考试成绩趋势" right={<Ghost onClick={() => go("report")}>查看报告</Ghost>} />
-            <div className="flex items-end gap-5 h-[calc(100%-40px)] min-h-[140px] px-3 pb-1">
-              {bars.map((b) => (
-                <div key={b.label} className="flex-1 flex flex-col items-center justify-end gap-2 h-full">
-                  <div className="text-xs font-semibold text-ink1">{b.v}</div>
-                  <div
-                    className={`w-11 rounded-t-md rounded-b-sm ${b.hot ? "bg-accent" : "bg-accent-soft"}`}
-                    style={{ height: `${b.v * 1.4}px` }}
-                  />
-                  <div className="text-[11px] text-ink3">{b.label}</div>
-                </div>
-              ))}
-            </div>
+            {bars.length === 0 ? (
+              <div className="h-[calc(100%-40px)] min-h-[140px] flex flex-col items-center justify-center gap-2 text-ink3">
+                <Info size={18} />
+                <div className="text-xs">还没有模考成绩，从一张官方全真卷开始吧</div>
+                <Ghost onClick={() => go("exam")}>去考试</Ghost>
+              </div>
+            ) : (
+              <div className="flex items-end gap-5 h-[calc(100%-40px)] min-h-[140px] px-3 pb-1">
+                {bars.map((b) => (
+                  <div key={b.label} className="flex-1 flex flex-col items-center justify-end gap-2 h-full">
+                    <div className="text-xs font-semibold text-ink1">{b.v}</div>
+                    <div
+                      className={`w-11 rounded-t-md rounded-b-sm ${b.hot ? "bg-accent" : "bg-accent-soft"}`}
+                      style={{ height: `${Math.max(b.v * 1.4, 4)}px` }}
+                    />
+                    <div className="text-[11px] text-ink3">{b.label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         </div>
 

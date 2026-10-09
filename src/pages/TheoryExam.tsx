@@ -294,17 +294,26 @@ function StartScreen({
   const keyCount = Object.values(store.answerKey).reduce((n, m) => n + Object.keys(m).length, 0);
   const ai = aiStats();
 
+  // 全真卷连续编号拆节：√/×→判断(1-40)；字母 41-180→单选(减 40，得题库题号 1-140)；≥181→多选(减 180)
+  // 字母 ≤40 仅在单独粘贴题库单选前 40 题时出现
   const importAnswers = () => {
     const parsed: Record<string, string> = {};
     const re = /(\d+)\s*[\.、]?\s*([ABCDE√×对错]+)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(answerText))) parsed[m[1]] = m[2].toUpperCase();
-    const next = { ...store.answerKey };
+    const next = {
+      ...store.answerKey,
+      judge: { ...store.answerKey.judge },
+      single: { ...store.answerKey.single },
+      multi: { ...store.answerKey.multi },
+    };
     for (const [id, a] of Object.entries(parsed)) {
       const n = parseInt(id);
-      if (a === "√" || a === "对") (next.judge ??= {})[String(n)] = "√";
-      else if (a === "×" || a === "错") (next.judge ??= {})[String(n)] = "×";
-      else (next.single ??= {})[String(n)] = a;
+      if (a === "√" || a === "对") next.judge[String(n)] = "√";
+      else if (a === "×" || a === "错") next.judge[String(n)] = "×";
+      else if (n > 180) next.multi[String(n - 180)] = a;
+      else if (n > 40) next.single[String(n - 40)] = a;
+      else next.single[String(n)] = a;
     }
     setStore({ ...store, answerKey: next });
     setAnswerText("");
@@ -348,7 +357,7 @@ function StartScreen({
         </div>
         <div className="text-xs text-ink2 mt-2 leading-relaxed">
           刷题判分按 <b>用户导入答案 &gt; AI 参考答案</b> 的优先级合并：AI 已预生成全部 {ai.total} 题参考答案（高置信 {ai.high} · 中 {ai.medium} · 低 {ai.low}），
-          低置信题判分仅供参考；从「AI学讯」小程序核对后粘贴官方答案将自动覆盖 AI 答案（当前已导入 {keyCount} 条）。
+          低置信题判分仅供参考；从「AI学讯」小程序核对后粘贴官方答案将自动覆盖 AI 答案（当前已导入 {keyCount} 条）。官方全真卷判分不受影响，始终以卷内官方答案为准。
         </div>
       </Card>
 
@@ -356,14 +365,14 @@ function StartScreen({
         <div className="flex items-center justify-between">
           <div>
             <div className="text-[15px] font-semibold text-ink1">官方答案导入（可选，优先级最高）</div>
-            <div className="text-xs text-ink3 mt-1">从小程序「AI学讯」核对答案后，按 “1.A 2.C 3.√ …” 格式粘贴到下面，自动解析保存。</div>
+            <div className="text-xs text-ink3 mt-1">从小程序「AI学讯」核对答案后，按全真卷连续编号粘贴：判断 1-40 填 √/× · 单选 41-180 · 多选 181-190，自动解析分节保存。</div>
           </div>
         </div>
         <div className="flex gap-2.5 mt-3">
           <textarea
             value={answerText}
             onChange={(e) => setAnswerText(e.target.value)}
-            placeholder={"示例：\n1. A\n2. √\n3. C"}
+            placeholder={"示例：\n1. √\n41. A\n181. ABC"}
             className="flex-1 h-24 rounded-[10px] bg-surface2 p-3 text-[13px] font-mono text-ink1 outline-none focus:ring-1 focus:ring-accent resize-none selectable"
           />
           <div className="flex flex-col gap-2">

@@ -43,14 +43,15 @@ export function aiStats() {
 
 /**
  * 查一题的参考答案。优先级：用户从「AI学讯」导入的官方答案 > AI 参考答案。
- * 多选题的用户答案与单选共用 single 表（历史存储格式）。
+ * 用户答案按全真卷连续编号拆节存放（判断 1-40 / 单选 1-140 / 多选 1-10 各自的题号）。
  */
 export function refAnswer(
   store: Store,
   type: "judge" | "single" | "multi",
   id: number
 ): { a: string; src: "user" | "ai"; conf?: Conf } | null {
-  const userMap = type === "judge" ? store.answerKey.judge : store.answerKey.single;
+  const userMap =
+    type === "judge" ? store.answerKey.judge : type === "multi" ? store.answerKey.multi : store.answerKey.single;
   const user = userMap?.[String(id)];
   if (user) return { a: user, src: "user" };
   const ai = aiKey[type][String(id)];

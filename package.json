@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test:ui": "node scripts/ui-test.mjs"
+    "test:ui": "node scripts/ui-test.mjs",
+    "test:full": "node scripts/mock-full.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

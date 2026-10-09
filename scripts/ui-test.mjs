@@ -70,6 +70,7 @@ async function run() {
     const s = await store();
     assert.equal(s.history?.length, 1, `history 应为 1 条（StrictMode 重复写入?），实际 ${s.history?.length}`);
     assert.equal(s.wrongBook?.length, 20, `错题应收录 20 条，实际 ${s.wrongBook?.length}`);
+    assert.equal(Object.keys(s.theoryDone ?? {}).length, 0, "未作答的快速刷题不应计入 theoryDone");
     await page.getByRole("button", { name: "返回首页" }).click();
     await see("备考总览");
   });
@@ -137,6 +138,7 @@ async function run() {
     await page.waitForTimeout(200);
     const s = await store();
     assert.equal(s.mastered?.["k2-2"], true, "mastered[k2-2] 应为 true");
+    assert.ok(s.theoryDone?.["s2"], `例题作答应计入 theoryDone[s2]，实际 ${JSON.stringify(s.theoryDone ?? {})}`);
   });
 
   // T8 成绩报告：导出下载 + 跳转按钮

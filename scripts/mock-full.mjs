@@ -101,6 +101,7 @@ async function run() {
     assert.equal(s.history?.length, 1, `历史应恰好 1 条，实际 ${s.history?.length}`);
     assert.equal(s.history?.[0]?.score, 100, `成绩应为 100，实际 ${s.history?.[0]?.score}`);
     assert.equal(s.wrongBook?.length, 0, `全对应无错题，实际 ${s.wrongBook?.length}`);
+    assert.equal(Object.keys(s.theoryDone ?? {}).length, 0, "官方卷不应计入 theoryDone（非 900 题库）");
     const keyCount =
       Object.keys(s.answerKey?.judge ?? {}).length +
       Object.keys(s.answerKey?.single ?? {}).length +

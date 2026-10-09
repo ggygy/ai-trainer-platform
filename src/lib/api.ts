@@ -88,6 +88,7 @@ export type Store = {
   history: { date: string; score: number | null; theory: number | null; practical: number | null; minutes: number }[];
   wrongBook: { id: string; type: string; text: string; count: number }[];
   answerKey: { judge?: Record<string, string>; single?: Record<string, string>; multi?: Record<string, string> }; // 全真卷连续编号拆节存放（judge/single/multi 各按题型题号）
+  theoryDone: Record<string, string>; // 已作答理论题 {"s5":"2026-10-09"}（key=j/s/m+题号，官方卷不计入）
   mastered: Record<string, boolean>; // 知识点掌握标记 {"k2-2":true}
   materialDir: string;
 };
@@ -98,6 +99,7 @@ const DEFAULT_STORE: Store = {
   history: [],
   wrongBook: [],
   answerKey: {},
+  theoryDone: {},
   mastered: {},
   materialDir: "/Users/zhouwangjun/Desktop/codeing/AI/人工智能训练师三级上网素材",
 };

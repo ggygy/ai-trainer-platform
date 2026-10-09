@@ -447,8 +447,13 @@ function ResultScreen({
   useEffect(() => {
     if (savedRef.current) return; // StrictMode 下 effect 跑两次，避免重复记录成绩
     savedRef.current = true;
+    // 刷题统计：非官方卷中实际作答过的题计入 theoryDone（官方卷 190 题不属于 900 题库）
+    const today = new Date().toISOString().slice(0, 10);
+    const theoryDone = { ...store.theoryDone };
+    if (!officialKey) for (const v of verdict.perQ) if (answers[v.q.key]?.length) theoryDone[v.q.key] = today;
     const next: Store = {
       ...store,
+      theoryDone,
       history: [
         ...store.history,
         { date: new Date().toISOString().slice(0, 10), score: verdict.score, theory: null, practical: null, minutes },

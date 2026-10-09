@@ -25,6 +25,24 @@ export default function TheoryLearn() {
   };
   const [, setMasteredTick] = useState(0);
 
+  // 作答即计入刷题统计；答错写入错题本（与文案承诺一致）
+  const answerQuiz = (letter: string) => {
+    if (picked !== null) return;
+    setPicked(letter);
+    const s = loadStore();
+    const today = new Date().toISOString().slice(0, 10);
+    s.theoryDone = { ...(s.theoryDone ?? {}), [`s${quiz.id}`]: today };
+    const right = aiKey.single[String(quiz.id)]?.a;
+    if (letter !== right) {
+      const wb = [...(s.wrongBook ?? [])];
+      const hit = wb.find((w) => w.id === `s${quiz.id}`);
+      if (hit) hit.count++;
+      else wb.push({ id: `s${quiz.id}`, type: "单选", text: quiz.stem.slice(0, 40), count: 1 });
+      s.wrongBook = wb;
+    }
+    saveStore(s);
+  };
+
   const nextQuiz = () => {
     setQuizIdx((i) => (i + 1) % QUIZ_POOL.length);
     setPicked(null);
@@ -123,7 +141,7 @@ export default function TheoryLearn() {
                 return (
                   <button
                     key={letter}
-                    onClick={() => picked === null && setPicked(letter)}
+                    onClick={() => answerQuiz(letter)}
                     className={`flex items-center gap-3 px-4 py-2.5 rounded-[10px] border text-left ${
                       revealed && isRight
                         ? "bg-ok-soft border-ok"

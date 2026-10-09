@@ -125,6 +125,7 @@ export const QUESTION_GROUPS: QuestionGroup[] = [
 ];
 
 export const EXAM_INFO = {
+  examDate: "2026-11-15", // 考试日期（首页倒计时据此后算）
   practical: { minutes: 120, desc: "从 8 个题组共 40 题中抽题 · 最多 4 个代码题 + Excel 操作" },
   theory: { minutes: 90, counts: "140 单选 + 10 多选 + 40 判断 = 190 题" },
   passLine: 60,

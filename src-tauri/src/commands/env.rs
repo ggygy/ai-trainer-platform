@@ -46,7 +46,7 @@ fn sh(cmd: &str) -> Option<String> {
     None
 }
 
-/// 解析可用的 Python 启动命令，返回 (参数前缀, --version 输出)。
+/// 解析可用的 Python 启动命令，返回 (命令前缀, --version 输出)。
 /// Windows 上 `python3` 常是 Microsoft Store 的跳转 stub（未装 Python 时也存在），
 /// 故按候选逐个探测 `--version`，只认真实输出；`py` 启动器需要 "-3" 参数。
 fn python_prefix() -> Option<(Vec<String>, String)> {
@@ -64,7 +64,72 @@ fn python_prefix() -> Option<(Vec<String>, String)> {
             }
         }
     }
+    // PATH 探测全部失败后，Windows 回落：直接探测常见安装目录里的 python.exe
+    // （装 Python 时没勾「Add python.exe to PATH」的用户装了也探测不到，见 issue #1）
+    #[cfg(target_os = "windows")]
+    if let Some(found) = windows_python_fallback() {
+        return Some(found);
+    }
     None
+}
+
+/// Windows 常见 Python 安装位置回落探测（不走 PATH，直接 spawn python.exe）：
+/// 用户级 %LOCALAPPDATA%\Programs\Python\Python3xx、全用户级 Program Files\Python3xx、
+/// 旧版默认 C:\Python3xx。
+#[cfg(target_os = "windows")]
+fn windows_python_fallback() -> Option<(Vec<String>, String)> {
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(la) = std::env::var("LOCALAPPDATA") {
+        roots.push(std::path::PathBuf::from(&la).join("Programs").join("Python"));
+    }
+    for base in ["C:\\Program Files\\Python", "C:\\Program Files (x86)\\Python", "C:\\Python"] {
+        roots.push(std::path::PathBuf::from(base));
+    }
+    // 3.15 → 3.8 从新到旧逐个试
+    for ver in (38..=315).rev() {
+        for root in &roots {
+            let exe = root.join(format!("Python{ver}")).join("python.exe");
+            let mut c = Command::new(&exe);
+            c.arg("--version");
+            no_window(&mut c);
+            let Ok(out) = c.output() else { continue };
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if out.status.success() && s.starts_with("Python ") {
+                return Some((vec![exe.to_string_lossy().to_string()], s));
+            }
+        }
+    }
+    None
+}
+
+/// 供 shell_command 使用的前缀：python 可能是含空格的完整路径（Windows 回落探测），
+/// 需要加引号；cmd /C 收到 Rust 再包一层引号后恰好命中其「保留内部引号」的解析分支。
+fn shell_prefix(py: &[String]) -> String {
+    let head = &py[0];
+    if head.contains(' ') {
+        format!("\"{head}\"")
+    } else {
+        head.clone()
+    }
+}
+
+/// 未找到 Python 时的平台化指引（写入安装日志）
+fn python_missing_hint() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "未找到可用的 Python。请到 python.org 下载安装包，安装首页勾选「Add python.exe to PATH」；\
+         若已安装请勾选该项重装（或手动把 Python 目录加入 PATH），完成后重启本应用再试。\
+         也可以直接在 Microsoft Store 搜索 Python 3 安装。"
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "未找到可用的 Python。终端执行 xcode-select --install 可装系统级 python3，\
+         或到 python.org 下载安装包，完成后重启本应用再试。"
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "未找到可用的 Python。请用系统包管理器安装（如 sudo apt install python3 python3-pip），完成后重启本应用再试。"
+    }
 }
 
 #[tauri::command]
@@ -79,7 +144,7 @@ pub fn detect_env() -> Vec<ToolInfo> {
         }
         return result;
     };
-    let p = py.join(" ");
+    let p = shell_prefix(&py);
 
     result.push(ToolInfo {
         name: "python".into(),
@@ -138,11 +203,11 @@ pub fn install_packages(names: Vec<String>, app: AppHandle) {
         };
 
         let Some((py, _)) = python_prefix() else {
-            emit_line(&app, "[错误] 未找到可用的 Python，请先安装 Python 并勾选加入 PATH".into());
+            emit_line(&app, format!("[错误] {}", python_missing_hint()));
             let _ = app.emit("install-done", serde_json::json!({ "ok": false }));
             return;
         };
-        let p = py.join(" ");
+        let p = shell_prefix(&py);
         let list = names.join(" ");
 
         emit_line(&app, format!("$ {p} -m pip install -U {list}"));

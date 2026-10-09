@@ -42,7 +42,7 @@ src/
   pages/                 # 7 个页面组件；深链接 ?page=<id>&paper=official&group=2.2&idx=0&ref=1
   components/            # ui.tsx 基础件、exam-ui.tsx 考试件、Sidebar
 src-tauri/src/commands/  # mod.rs 平台原语（shell_command：mac=zsh 登录壳 / win=cmd /C + CREATE_NO_WINDOW）
-                         # env.rs 环境检测/安装（Python 候选探测：mac=python3，win=python→py -3；PEP 668 失败自动加 --break-system-packages）
+                         # env.rs 环境检测/安装（Python 候选探测：mac=python3，win=python→py -3→常见安装目录全路径回落；PEP 668 失败自动加 --break-system-packages；install_python 可应用内装 Python：win=winget/python.org 静默装、mac=下载官方 pkg 开图形安装器）
                          # jupyter.rs 子进程起停（端口 8889，stderr 流式解析 token；win 停止用 taskkill /T 杀进程树）
 scripts/ui-test.mjs      # E2E 测试（选择器若因 UI 改动失效需同步更新）
 scripts/mock-full.mjs    # 全真模考完整回归（190 题全卷）

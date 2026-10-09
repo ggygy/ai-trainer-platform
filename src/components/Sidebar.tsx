@@ -39,7 +39,7 @@ export default function Sidebar({
           <GraduationCap size={19} className="text-white" />
         </div>
         <div>
-          <div className="text-[13px] font-bold text-ink1">训练师备考平台</div>
+          <div className="text-[13px] font-bold text-ink1">AI Trainer Prep</div>
           <div className="text-[10px] text-ink3">人工智能训练师 · 三级</div>
         </div>
       </div>

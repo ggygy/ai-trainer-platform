@@ -14,6 +14,7 @@
 | [0008](0008-pip-break-system-packages.md) | pip 安装遇 PEP 668 受管环境自动降级 `--break-system-packages` | 已接受 | 2026-10-08 |
 | [0009](0009-zustand-state.md) | 状态管理迁移 zustand persist（key/介质不变，信封格式迁移） | 已接受 | 2026-10-09 |
 | [0010](0010-windows-platform.md) | Windows 支持：cmd/注册表 PATH + NSIS + taskkill 进程树 | 已接受 | 2026-10-09 |
+| [0011](0011-english-name-and-python-bootstrap.md) | 英文产品名 + 应用内一键安装 Python 运行时 + 章节刷题顺序差异化 | 已接受 | 2026-10-09 |
 
 ## 新增 ADR 的约定
 

@@ -1,0 +1,173 @@
+// 自动化 UI 测试：playwright-core + 系统 Edge（无头）
+// 运行：node scripts/ui-test.mjs   （需 vite dev server 在 1420 端口）
+import { chromium } from "playwright-core";
+import assert from "node:assert";
+
+const EDGE = "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
+const BASE = "http://localhost:1420";
+const results = [];
+const jsErrors = [];
+
+async function run() {
+  const browser = await chromium.launch({ executablePath: EDGE, headless: true });
+  const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+  page.on("pageerror", (e) => jsErrors.push("pageerror: " + e.message));
+  page.on("console", (m) => m.type() === "error" && jsErrors.push("console: " + m.text().slice(0, 160)));
+
+  const step = async (name, fn) => {
+    try {
+      await fn();
+      results.push(["PASS", name, ""]);
+    } catch (e) {
+      results.push(["FAIL", name, String(e.message ?? e).slice(0, 220)]);
+      await page.screenshot({ path: `/tmp/atp-impl/fail-${results.length}.png` }).catch(() => {});
+    }
+  };
+  const nav = (name) => page.getByRole("navigation").getByRole("button", { name });
+  const store = () => page.evaluate(() => JSON.parse(localStorage.getItem("atp.store.v1") ?? "{}"));
+  const see = (text, timeout = 6000) =>
+    page.getByText(text, { exact: false }).first().waitFor({ timeout, state: "visible" });
+
+  await page.goto(BASE + "/", { waitUntil: "networkidle" });
+
+  // T1 侧边栏导航
+  await step("T1 侧边栏可进入全部 6 个主页面", async () => {
+    for (const [item, hint] of [
+      ["理论学习", "知识体系"],
+      ["模拟考试", "理论模拟考试"],
+      ["实操训练", "官方 40 题"],
+      ["环境助手", "环境助手"],
+      ["成绩错题", "成绩报告"],
+      ["首页", "备考总览"],
+    ]) {
+      await nav(item).click();
+      await see(hint);
+    }
+  });
+
+  // T2 首页快捷入口
+  await step("T2 首页快捷入口跳转（开始模拟考试 / 打开环境助手）", async () => {
+    await page.getByRole("button", { name: "开始模拟考试", exact: true }).first().click();
+    await see("理论模拟考试");
+    await nav("首页").click();
+    await page.getByRole("button", { name: "打开环境助手" }).click();
+    await see("依赖清单");
+    await nav("首页").click();
+    await see("备考总览");
+  });
+
+  // T3 快速刷题全流程 + StrictMode 不重复记录
+  await step("T3 快速刷题：开考→交卷→计分→历史恰好 1 条", async () => {
+    await nav("模拟考试").click();
+    const cards = page.locator("div.cursor-pointer");
+    await cards.nth(3).getByRole("button", { name: "开始考试", exact: true }).click();
+    await see("第 1 / 45 题");
+    for (let i = 0; i < 3; i++) await page.getByRole("button", { name: "下一题" }).click();
+    await page.getByRole("button", { name: "交卷" }).click();
+    await see("考试结束");
+    await see("综合得分");
+    await page.waitForTimeout(300);
+    const s = await store();
+    assert.equal(s.history?.length, 1, `history 应为 1 条（StrictMode 重复写入?），实际 ${s.history?.length}`);
+    assert.equal(s.wrongBook?.length, 20, `错题应收录 20 条，实际 ${s.wrongBook?.length}`);
+    await page.getByRole("button", { name: "返回首页" }).click();
+    await see("备考总览");
+  });
+
+  // T4 官方全真卷深链 + 答题 + 判分 + 返回首页不复发考试
+  await step("T4 官方全真卷：深链自动开考→答题→官方判分→返回首页", async () => {
+    await page.goto(BASE + "/?page=exam&paper=official", { waitUntil: "networkidle" });
+    await see("第 1 / 190 题");
+    await see("官方全真卷");
+    await page.getByRole("button", { name: "错误 ×" }).click(); // 官方卷第 1 判断题答案为 ×
+    await page.getByRole("button", { name: "41", exact: true }).click(); // 答题卡跳到单选第 1 题
+    await see("在浏览器中，要打开一个新的标签页");
+    await page.getByRole("button", { name: /Ctrl \+ T/ }).click();
+    await page.getByRole("button", { name: "交卷" }).click();
+    await see("考试结束");
+    await see("官方答案判定");
+    const s = await store();
+    assert.equal(s.history?.length, 2, `官方卷应记 1 次历史，实际累计 ${s.history?.length}`);
+    await page.getByRole("button", { name: "返回首页" }).click();
+    await page.waitForTimeout(400);
+    await see("备考总览");
+    assert.ok(!page.url().includes("paper=official"), "返回首页应清除深链参数");
+  });
+
+  // T5 实操：入口/参考答案/切题/标记完成
+  await step("T5 实操训练：开始练习→参考答案展开→切题→标记完成落库", async () => {
+    await nav("实操训练").click();
+    await page.locator("button", { hasText: "开始练习" }).nth(3).click();
+    await see("2.2.1");
+    await page.getByRole("button", { name: /展开官方参考代码/ }).click();
+    await see("2.2.1.ipynb");
+    await page.getByRole("button", { name: /收起答案/ }).click();
+    await page.locator("select").selectOption("2.2-2");
+    await see("2.2.3");
+    await page.getByRole("button", { name: "标记完成", exact: true }).click();
+    await page.waitForTimeout(300);
+    const s = await store();
+    assert.ok(s.practice?.["2.2-2"]?.done, "practice[2.2-2].done 应为 true");
+  });
+
+  // T6 环境助手：检测 + mock 安装 + mock Jupyter
+  await step("T6 环境助手：重新检测→一键安装(mock 日志)→启动 Jupyter(mock)", async () => {
+    await nav("环境助手").click();
+    await page.getByRole("button", { name: /重新检测/ }).click();
+    await see("已安装", 8000);
+    await page.getByRole("button", { name: /一键安装缺失依赖/ }).click();
+    await see("(mock) pip install");
+    await see("安装完成 ✓", 10000);
+    await page.getByRole("button", { name: "启动 Jupyter" }).click();
+    await see("✓ Jupyter 已就绪");
+    await page.getByRole("button", { name: /打开 Lab/ }).click(); // 浏览器预览模式应打日志而非开窗
+    await see("浏览器预览模式");
+  });
+
+  // T7 理论学习：例题轮换 + 判分反馈 + 掌握标记持久化
+  await step("T7 理论学习：下一题轮换→选项判分→标记已掌握持久化", async () => {
+    await nav("理论学习").click();
+    await see("配套例题");
+    await see("单选 1/8");
+    await page.getByRole("button", { name: "下一题" }).click();
+    await see("单选 2/8");
+    await page.locator("div.bg-surface.border", { hasText: "配套例题" }).locator("button").last().click();
+    await see("正确答案");
+    await page.getByRole("button", { name: "标记已掌握" }).click();
+    await page.waitForTimeout(200);
+    const s = await store();
+    assert.equal(s.mastered?.["k2-2"], true, "mastered[k2-2] 应为 true");
+  });
+
+  // T8 成绩报告：导出下载 + 跳转按钮
+  await step("T8 成绩报告：导出报告下载 + 重练全部错题/去刷理论题跳转", async () => {
+    await nav("成绩错题").click();
+    await see("错题本");
+    const dlP = page.waitForEvent("download", { timeout: 8000 });
+    await page.getByRole("button", { name: /导出报告/ }).click();
+    const dl = await dlP;
+    assert.ok(dl.suggestedFilename().includes("备考报告"), "导出文件名应含 备考报告");
+    await page.getByRole("button", { name: /重练全部错题/ }).click();
+    await see("理论模拟考试");
+    await nav("成绩错题").click();
+    await page.getByText("去刷理论题").click();
+    await see("理论模拟考试");
+  });
+
+  await browser.close();
+}
+
+run()
+  .catch((e) => results.push(["FAIL", "测试执行中断", String(e).slice(0, 200)]))
+  .finally(() => {
+    console.log("\n===== 自动化 UI 测试结果 =====");
+    for (const [st, name, msg] of results)
+      console.log(`${st === "PASS" ? "✅" : "❌"} ${name}${msg ? `\n   └ ${msg}` : ""}`);
+    const fails = results.filter((r) => r[0] === "FAIL").length;
+    if (jsErrors.length) {
+      console.log(`\n⚠️ 页面 JS 报错 ${jsErrors.length} 条：`);
+      for (const e of [...new Set(jsErrors)].slice(0, 8)) console.log("   · " + e);
+    } else console.log("\n页面无 JS 报错");
+    console.log(`\n${results.length - fails}/${results.length} 通过`);
+    process.exit(fails ? 1 : 0);
+  });

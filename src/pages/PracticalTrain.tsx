@@ -1,10 +1,10 @@
 import { ArrowRight, Shuffle, Info } from "lucide-react";
 import { Card, Badge, Btn, Ghost, PageHead, Progress } from "../components/ui";
 import { QUESTION_GROUPS, type QuestionGroup } from "../data/content";
-import { loadStore } from "../lib/api";
+import { useStore } from "../lib/store";
 
 export default function PracticalTrain({ openQ }: { openQ: (groupId: string, idx: number) => void }) {
-  const store = loadStore();
+  const store = useStore();
   const done = Object.values(store.practice).filter((p) => p.done).length;
   const total = QUESTION_GROUPS.reduce((n, g) => n + g.titles.length, 0);
 

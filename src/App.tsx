@@ -7,7 +7,7 @@ import PracticalTrain from "./pages/PracticalTrain";
 import PracticalExam from "./pages/PracticalExam";
 import EnvAssistant from "./pages/EnvAssistant";
 import Report from "./pages/Report";
-import { detectEnv, loadStore, saveStore, type Store, type ToolInfo } from "./lib/api";
+import { detectEnv, type ToolInfo } from "./lib/api";
 
 const PAGE_IDS: PageId[] = ["home", "learn", "exam", "practical", "practical-exam", "env", "report"];
 
@@ -24,7 +24,6 @@ function initialPractical(): { groupId: string; idx: number } | undefined {
 
 export default function App() {
   const [page, setPage] = useState<PageId>(initialPage);
-  const [store, setStore] = useState<Store>(() => loadStore());
   const [tools, setTools] = useState<ToolInfo[] | null>(null);
   const [practicalInitial, setPracticalInitial] = useState<{ groupId: string; idx: number } | undefined>(initialPractical);
   const autoOfficial = new URLSearchParams(window.location.search).get("paper") === "official";
@@ -41,11 +40,6 @@ export default function App() {
   const missing = tools ? tools.filter((t) => !t.ok && !["python", "pip"].includes(t.name)).length : 0;
   const envState = tools === null ? null : { ok: missing === 0, missing };
 
-  const updateStore = (s: Store) => {
-    setStore(s);
-    saveStore(s);
-  };
-
   const navigate = (p: PageId) => {
     setPage(p);
   };
@@ -59,21 +53,13 @@ export default function App() {
     <div className="flex h-full min-h-0">
       <Sidebar page={page} onNavigate={navigate} envOk={tools === null ? null : missing === 0} envText={tools === null ? "正在检测环境…" : missing === 0 ? "环境就绪 · Jupyter 可启动" : `环境待修复 · ${missing} 项依赖`} />
       <main className="flex-1 min-w-0 min-h-0">
-        {page === "home" && <Dashboard store={store} go={navigate} env={envState} />}
+        {page === "home" && <Dashboard go={navigate} env={envState} />}
         {page === "learn" && <TheoryLearn />}
-        {page === "exam" && <TheoryExam store={store} setStore={updateStore} autoOfficial={autoOfficial} />}
+        {page === "exam" && <TheoryExam autoOfficial={autoOfficial} />}
         {page === "practical" && <PracticalTrain openQ={openPractical} />}
-        {page === "practical-exam" && (
-          <PracticalExam
-            initial={practicalInitial}
-            onProgress={() => {
-              const s = loadStore();
-              setStore(s);
-            }}
-          />
-        )}
+        {page === "practical-exam" && <PracticalExam initial={practicalInitial} />}
         {page === "env" && <EnvAssistant onEnvChanged={refreshEnv} />}
-        {page === "report" && <Report store={store} onGo={navigate} />}
+        {page === "report" && <Report onGo={navigate} />}
       </main>
     </div>
   );

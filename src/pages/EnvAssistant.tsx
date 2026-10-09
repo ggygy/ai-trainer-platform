@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Card, CardHead, Badge, Btn, Ghost, PageHead } from "../components/ui";
 import { DEPENDENCIES } from "../data/content";
+import { useStore } from "../lib/store";
 import {
   detectEnv,
   installPackages,
@@ -18,8 +19,6 @@ import {
   jupyterStop,
   onJupyterReady,
   isTauri,
-  loadStore,
-  saveStore,
   type ToolInfo,
 } from "../lib/api";
 
@@ -30,7 +29,9 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
   const [phase, setPhase] = useState<Phase>("idle");
   const [logs, setLogs] = useState<string[]>([]);
   const [jupyter, setJupyter] = useState<{ running: boolean; url: string }>({ running: false, url: "" });
-  const [jupyterDir, setJupyterDir] = useState(loadStore().materialDir);
+  const materialDir = useStore((s) => s.materialDir);
+  const setMaterialDir = useStore((s) => s.setMaterialDir);
+  const [jupyterDir, setJupyterDir] = useState(materialDir);
   const logRef = useRef<HTMLDivElement>(null);
   const unReadyRef = useRef<(() => void) | null>(null);
 
@@ -77,7 +78,7 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
   };
 
   const startJupyter = async () => {
-    saveStore({ ...loadStore(), materialDir: jupyterDir });
+    setMaterialDir(jupyterDir); // 落库后 PracticalExam 的 Jupyter 工作目录随之生效
     setLogs((l) => [...l, `$ jupyter lab --no-browser --port=8889 --notebook-dir=${jupyterDir}`]);
     try {
       const info = await jupyterStart(jupyterDir);

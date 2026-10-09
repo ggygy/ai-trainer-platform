@@ -4,7 +4,7 @@ import { Card, Badge, Btn, Chip, Ghost, PageHead } from "../components/ui";
 import { KNOWLEDGE_TREE, LESSONS } from "../data/content";
 import theory from "../data/theory.json";
 import { aiKey } from "../lib/answers";
-import { loadStore, saveStore } from "../lib/api";
+import { useStore } from "../lib/store";
 
 const QUIZ_POOL = (theory as unknown as { single: { id: number; stem: string; options: [string, string][] }[] }).single.slice(0, 8);
 
@@ -15,32 +15,18 @@ export default function TheoryLearn() {
   const [picked, setPicked] = useState<string | null>(null);
   const quizRef = useRef<HTMLDivElement>(null);
   const quiz = QUIZ_POOL[quizIdx % QUIZ_POOL.length];
-  const mastered = !!loadStore().mastered?.[sel];
-
-  const toggleMastered = () => {
-    const s = loadStore();
-    s.mastered = { ...(s.mastered ?? {}), [sel]: !s.mastered?.[sel] };
-    saveStore(s);
-    setMasteredTick((t) => t + 1);
-  };
-  const [, setMasteredTick] = useState(0);
+  const mastered = useStore((s) => !!s.mastered?.[sel]);
 
   // 作答即计入刷题统计；答错写入错题本（与文案承诺一致）
   const answerQuiz = (letter: string) => {
     if (picked !== null) return;
     setPicked(letter);
-    const s = loadStore();
-    const today = new Date().toISOString().slice(0, 10);
-    s.theoryDone = { ...(s.theoryDone ?? {}), [`s${quiz.id}`]: today };
     const right = aiKey.single[String(quiz.id)]?.a;
-    if (letter !== right) {
-      const wb = [...(s.wrongBook ?? [])];
-      const hit = wb.find((w) => w.id === `s${quiz.id}`);
-      if (hit) hit.count++;
-      else wb.push({ id: `s${quiz.id}`, type: "单选", text: quiz.stem.slice(0, 40), count: 1 });
-      s.wrongBook = wb;
-    }
-    saveStore(s);
+    useStore.getState().recordQuizAnswer(`s${quiz.id}`, letter !== right, quiz.stem);
+  };
+
+  const toggleMastered = () => {
+    useStore.getState().toggleMastered(sel);
   };
 
   const nextQuiz = () => {

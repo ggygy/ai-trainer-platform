@@ -12,24 +12,10 @@ import {
 import { Card, CardHead, Badge, Btn, Ghost } from "../components/ui";
 import { QUESTION_GROUPS, taskSteps } from "../data/content";
 import { practicalRef } from "../lib/answers";
-import {
-  jupyterStart,
-  jupyterStop,
-  onJupyterReady,
-  jupyterStatus,
-  isTauri,
-  loadStore,
-  saveStore,
-  openFolder,
-} from "../lib/api";
+import { useStore } from "../lib/store";
+import { jupyterStart, jupyterStop, onJupyterReady, jupyterStatus, isTauri, openFolder } from "../lib/api";
 
-export default function PracticalExam({
-  initial,
-  onProgress,
-}: {
-  initial?: { groupId: string; idx: number };
-  onProgress?: () => void;
-}) {
+export default function PracticalExam({ initial }: { initial?: { groupId: string; idx: number } }) {
   const [sel, setSel] = useState(initial ?? { groupId: "2.2", idx: 0 });
   const group = QUESTION_GROUPS.find((g) => g.id === sel.groupId) ?? QUESTION_GROUPS[3];
 
@@ -72,9 +58,12 @@ export default function PracticalExam({
   const refText = practicalRef.answers[`${group.id}.${sel.idx + 1}`] ?? "";
   const [showRef, setShowRef] = useState(() => new URLSearchParams(window.location.search).get("ref") === "1");
 
+  const materialDir = useStore((s) => s.materialDir);
+  const markPracticeDone = useStore((s) => s.markPracticeDone);
+
   const startJupyter = async () => {
     setStarting(true);
-    const dir = `${loadStore().materialDir}/${dirOf(group)}`;
+    const dir = `${materialDir}/${dirOf(group)}`;
     try {
       const info = await jupyterStart(dir);
       if (info.running && info.url) setJp({ running: true, url: info.url });
@@ -87,10 +76,7 @@ export default function PracticalExam({
   };
 
   const markDone = () => {
-    const s = loadStore();
-    s.practice[qKey] = { done: true, lastAt: new Date().toISOString().slice(0, 10) };
-    saveStore(s);
-    onProgress?.(); // 同步 App 状态，仪表盘/报告的进度立即刷新
+    markPracticeDone(qKey); // zustand 订阅：仪表盘/报告的进度立即刷新
     setLog((l) => [...l, "✓ 已标记本题完成"]);
   };
 
@@ -190,7 +176,7 @@ export default function PracticalExam({
               <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-surface2">
                 <FileSpreadsheet size={15} className="text-accent shrink-0" />
                 <span className="flex-1 text-xs font-medium text-ink1 truncate">{dirOf(group)}/</span>
-                <button className="text-ink3 hover:text-accent" title="打开素材目录" onClick={() => openFolder(`${loadStore().materialDir}/${dirOf(group)}`)}>
+                <button className="text-ink3 hover:text-accent" title="打开素材目录" onClick={() => openFolder(`${materialDir}/${dirOf(group)}`)}>
                   <FolderOpen size={14} />
                 </button>
               </div>

@@ -1,18 +1,11 @@
 import { Play, BookOpen, Timer, ArrowRight, CircleCheck, TriangleAlert, Info } from "lucide-react";
 import { Card, CardHead, Badge, Btn, Ghost, PageHead } from "../components/ui";
 import { EXAM_INFO, QUESTION_GROUPS } from "../data/content";
-import type { Store } from "../lib/api";
+import { useStore } from "../lib/store";
 import type { PageId } from "../components/Sidebar";
 
-export default function Dashboard({
-  store,
-  go,
-  env,
-}: {
-  store: Store;
-  go: (p: PageId) => void;
-  env: { ok: boolean; missing: number } | null;
-}) {
+export default function Dashboard({ go, env }: { go: (p: PageId) => void; env: { ok: boolean; missing: number } | null }) {
+  const store = useStore();
   const practiceDone = Object.values(store.practice).filter((p) => p.done).length;
   const totalQ = QUESTION_GROUPS.reduce((n, g) => n + g.titles.length, 0);
 

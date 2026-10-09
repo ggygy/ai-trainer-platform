@@ -82,7 +82,7 @@ function mockEnv(): ToolInfo[] {
   ];
 }
 
-// —— 本地存储（进度 / 错题 / 考试历史 / 答案） ——
+// —— 本地持久化状态的数据模型（读写与存储见 lib/store.ts，zustand persist） ——
 export type Store = {
   practice: Record<string, { done: boolean; wrong?: boolean; lastAt: string }>;
   history: { date: string; score: number | null; theory: number | null; practical: number | null; minutes: number }[];
@@ -92,28 +92,3 @@ export type Store = {
   mastered: Record<string, boolean>; // 知识点掌握标记 {"k2-2":true}
   materialDir: string;
 };
-
-const KEY = "atp.store.v1";
-const DEFAULT_STORE: Store = {
-  practice: {},
-  history: [],
-  wrongBook: [],
-  answerKey: {},
-  theoryDone: {},
-  mastered: {},
-  materialDir: "/Users/zhouwangjun/Desktop/codeing/AI/人工智能训练师三级上网素材",
-};
-
-export function loadStore(): Store {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULT_STORE, ...JSON.parse(raw) };
-  } catch {
-    /* ignore */
-  }
-  return { ...DEFAULT_STORE };
-}
-
-export function saveStore(s: Store) {
-  localStorage.setItem(KEY, JSON.stringify(s));
-}

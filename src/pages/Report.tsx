@@ -2,8 +2,9 @@ import { useState } from "react";
 import { CircleCheck, TriangleAlert, Download } from "lucide-react";
 import { Card, Badge, Btn, Ghost, PageHead, Donut } from "../components/ui";
 import { QUESTION_GROUPS } from "../data/content";
-import type { Store } from "../lib/api";
-export default function Report({ store, onGo }: { store: Store; onGo: (p: "exam") => void }) {
+import { useStore } from "../lib/store";
+export default function Report({ onGo }: { onGo: (p: "exam") => void }) {
+  const store = useStore();
   const [expandAll, setExpandAll] = useState(false);
   const done = Object.values(store.practice).filter((p) => p.done).length;
   const total = QUESTION_GROUPS.reduce((n, g) => n + g.titles.length, 0);

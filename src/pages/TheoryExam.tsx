@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Timer, Flag, RotateCw, FileSpreadsheet, BadgeCheck, Sparkles } from "lucide-react";
 import { Badge, Btn, Card, Chip, OptionRow } from "../components/exam-ui";
 import theory from "../data/theory.json";
-import { saveStore, type Store } from "../lib/api";
 import { aiStats, officialPaper, refAnswer } from "../lib/answers";
+import { useStore } from "../lib/store";
 
 type Q = { key: string; type: "single" | "multi" | "judge"; id: number; stem: string; options: [string, string][] };
 
@@ -39,15 +39,7 @@ function buildOfficialPaper(): { paper: Q[]; key: Record<string, string> } {
   return { paper: [...j, ...s, ...m], key };
 }
 
-export default function TheoryExam({
-  store,
-  setStore,
-  autoOfficial,
-}: {
-  store: Store;
-  setStore: (s: Store) => void;
-  autoOfficial?: boolean;
-}) {
+export default function TheoryExam({ autoOfficial }: { autoOfficial?: boolean }) {
   const [config, setConfig] = useState<{ j: number; s: number; m: number; official: boolean } | null>(null);
   const [officialKey, setOfficialKey] = useState<Record<string, string> | null>(null);
   const [paper, setPaper] = useState<Q[] | null>(null);
@@ -85,7 +77,7 @@ export default function TheoryExam({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!paper || !config) return <StartScreen onStart={start} onOfficial={startOfficial} store={store} setStore={setStore} />;
+  if (!paper || !config) return <StartScreen onStart={start} onOfficial={startOfficial} />;
   if (finished)
     return (
       <ResultScreen
@@ -94,8 +86,6 @@ export default function TheoryExam({
         elapsedMin={Math.round((totalSeconds(config) - seconds) / 60)}
         officialKey={config.official ? officialKey : null}
         again={() => setPaper(null)}
-        store={store}
-        setStore={setStore}
         marked={marked}
       />
     );
@@ -275,14 +265,13 @@ function JudgeRow({ label, selected, onClick }: { label: string; selected: boole
 function StartScreen({
   onStart,
   onOfficial,
-  store,
-  setStore,
 }: {
   onStart: (j: number, s: number, m: number) => void;
   onOfficial: () => void;
-  store: Store;
-  setStore: (s: Store) => void;
 }) {
+  const answerKey = useStore((s) => s.answerKey);
+  const importAnswers = useStore((s) => s.importAnswers);
+  const clearAnswers = useStore((s) => s.clearAnswers);
   const [preset, setPreset] = useState<"official" | "full" | "half" | "quick">("official");
   const [answerText, setAnswerText] = useState("");
   const presets = {
@@ -291,31 +280,15 @@ function StartScreen({
     half: { label: "半卷练习", desc: "判断 20 + 单选 70 + 多选 5 · 45 分钟", official: false },
     quick: { label: "快速刷题", desc: "判断 10 + 单选 30 + 多选 5 · 20 分钟", official: false },
   };
-  const keyCount = Object.values(store.answerKey).reduce((n, m) => n + Object.keys(m).length, 0);
+  const keyCount = Object.values(answerKey ?? {}).reduce((n, m) => n + Object.keys(m ?? {}).length, 0);
   const ai = aiStats();
 
-  // 全真卷连续编号拆节：√/×→判断(1-40)；字母 41-180→单选(减 40，得题库题号 1-140)；≥181→多选(减 180)
-  // 字母 ≤40 仅在单独粘贴题库单选前 40 题时出现
-  const importAnswers = () => {
+  const doImport = () => {
     const parsed: Record<string, string> = {};
     const re = /(\d+)\s*[\.、]?\s*([ABCDE√×对错]+)/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(answerText))) parsed[m[1]] = m[2].toUpperCase();
-    const next = {
-      ...store.answerKey,
-      judge: { ...store.answerKey.judge },
-      single: { ...store.answerKey.single },
-      multi: { ...store.answerKey.multi },
-    };
-    for (const [id, a] of Object.entries(parsed)) {
-      const n = parseInt(id);
-      if (a === "√" || a === "对") next.judge[String(n)] = "√";
-      else if (a === "×" || a === "错") next.judge[String(n)] = "×";
-      else if (n > 180) next.multi[String(n - 180)] = a;
-      else if (n > 40) next.single[String(n - 40)] = a;
-      else next.single[String(n)] = a;
-    }
-    setStore({ ...store, answerKey: next });
+    importAnswers(parsed);
     setAnswerText("");
   };
 
@@ -376,14 +349,10 @@ function StartScreen({
             className="flex-1 h-24 rounded-[10px] bg-surface2 p-3 text-[13px] font-mono text-ink1 outline-none focus:ring-1 focus:ring-accent resize-none selectable"
           />
           <div className="flex flex-col gap-2">
-            <Btn primary onClick={importAnswers} disabled={!answerText.trim()}>
+            <Btn primary onClick={doImport} disabled={!answerText.trim()}>
               解析导入
             </Btn>
-            <Btn
-              onClick={() => {
-                setStore({ ...store, answerKey: {} });
-              }}
-            >
+            <Btn onClick={clearAnswers}>
               <RotateCw size={13} /> 清空答案
             </Btn>
           </div>
@@ -404,8 +373,6 @@ function ResultScreen({
   elapsedMin,
   officialKey,
   again,
-  store,
-  setStore,
   marked,
 }: {
   paper: Q[];
@@ -413,10 +380,9 @@ function ResultScreen({
   elapsedMin: number;
   officialKey: Record<string, string> | null;
   again: () => void;
-  store: Store;
-  setStore: (s: Store) => void;
   marked: Set<string>;
 }) {
+  const store = useStore();
   const verdict = useMemo(() => {
     const perQ = paper.map((q) => {
       const right = officialKey ? officialKey[q.key] : refAnswer(store, q.type, q.id)?.a;
@@ -448,26 +414,12 @@ function ResultScreen({
     if (savedRef.current) return; // StrictMode 下 effect 跑两次，避免重复记录成绩
     savedRef.current = true;
     // 刷题统计：非官方卷中实际作答过的题计入 theoryDone（官方卷 190 题不属于 900 题库）
-    const today = new Date().toISOString().slice(0, 10);
-    const theoryDone = { ...store.theoryDone };
-    if (!officialKey) for (const v of verdict.perQ) if (answers[v.q.key]?.length) theoryDone[v.q.key] = today;
-    const next: Store = {
-      ...store,
-      theoryDone,
-      history: [
-        ...store.history,
-        { date: new Date().toISOString().slice(0, 10), score: verdict.score, theory: null, practical: null, minutes },
-      ],
-      wrongBook: [
-        ...store.wrongBook,
-        ...verdict.perQ
-          .filter((v) => !v.ok)
-          .slice(0, 20)
-          .map((v) => ({ id: v.q.key, type: v.q.type === "single" ? "单选" : v.q.type === "multi" ? "多选" : "判断", text: v.q.stem.slice(0, 40), count: 1 })),
-      ],
-    };
-    saveStore(next);
-    setStore(next);
+    const theoryKeys = officialKey ? [] : verdict.perQ.filter((v) => answers[v.q.key]?.length).map((v) => v.q.key);
+    const wrong = verdict.perQ
+      .filter((v) => !v.ok)
+      .slice(0, 20)
+      .map((v) => ({ id: v.q.key, type: v.q.type === "single" ? "单选" : v.q.type === "multi" ? "多选" : "判断", text: v.q.stem.slice(0, 40), count: 1 }));
+    useStore.getState().submitExam({ score: verdict.score, minutes, wrong, theoryKeys });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

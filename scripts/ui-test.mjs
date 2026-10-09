@@ -24,7 +24,7 @@ async function run() {
     }
   };
   const nav = (name) => page.getByRole("navigation").getByRole("button", { name });
-  const store = () => page.evaluate(() => JSON.parse(localStorage.getItem("atp.store.v1") ?? "{}"));
+  const store = () => page.evaluate(() => { const p = JSON.parse(localStorage.getItem("atp.store.v1") ?? "{}"); return p.state ?? p; }); // zustand persist 信封
   const see = (text, timeout = 6000) =>
     page.getByText(text, { exact: false }).first().waitFor({ timeout, state: "visible" });
 

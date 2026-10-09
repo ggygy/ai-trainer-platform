@@ -45,10 +45,14 @@ jobs:
           cp src-tauri/target/release/bundle/dmg/*.dmg "release/ai-trainer-platform_${VER}_aarch64.dmg"
           shasum -a 256 release/*.dmg > release/checksums-mac.txt
 
+      - name: 计算发布标签（版本-日期-短SHA）
+        id: tag
+        run: echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: 发布到 Release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}
+          TAG: ${{ steps.tag.outputs.tag }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           echo "$COMMIT_MSG" > commit-msg.txt
@@ -98,10 +102,14 @@ jobs:
           cp src-tauri/target/release/bundle/nsis/*-setup.exe "release/ai-trainer-platform_${VER}_x64-setup.exe"
           sha256sum release/*.exe > release/checksums-win.txt
 
+      - name: 计算发布标签（版本-日期-短SHA）
+        id: tag
+        run: echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: 发布到 Release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}
+          TAG: ${{ steps.tag.outputs.tag }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           {

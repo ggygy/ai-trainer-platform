@@ -1,5 +1,5 @@
-# 每次推送到 main（或手动触发）：macOS runner 打 Tauri 安装包 → 创建 Release 并挂到 assets
-# 产物：未签名的 arm64 .dmg（首次打开需右键 → 打开，绕过 Gatekeeper）
+# 每次推送到 main（或手动触发）：macOS + Windows 双平台打 Tauri 安装包，合入同一个 Release
+# 产物：未签名 dmg（arm64）+ NSIS exe（x64），下载见 Releases 页 assets
 name: 构建发布
 
 on:
@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,19 +38,70 @@ jobs:
       - name: 构建 Tauri 应用
         run: npm run tauri build
 
-      - name: 计算发布标签（版本-日期-短SHA）
-        id: tag
-        run: echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-
       - name: 规范化安装包文件名（GitHub assets 不支持非 ASCII 名）
         run: |
           mkdir -p release
           VER=$(node -p "require('./package.json').version")
           cp src-tauri/target/release/bundle/dmg/*.dmg "release/ai-trainer-platform_${VER}_aarch64.dmg"
-          shasum -a 256 release/*.dmg > release/checksums.txt
+          shasum -a 256 release/*.dmg > release/checksums-mac.txt
 
-      - name: 生成发布说明
+      - name: 发布到 Release assets
         env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          echo "$COMMIT_MSG" > commit-msg.txt
+          {
+            echo "自动构建 · 提交 ${{ github.sha }}"
+            echo
+            cat commit-msg.txt
+            echo
+            echo "---"
+            echo "- 安装包未签名：dmg 首次打开需「右键 → 打开」绕过 Gatekeeper；exe 安装时 SmartScreen 选「仍要运行」"
+            echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
+            echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
+          } > release-notes.md
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --prerelease --title "训练师备考平台 $TAG" --notes-file release-notes.md || true
+          gh release upload "$TAG" release/*.dmg release/checksums-mac.txt --clobber
+
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash  # git-bash 自带 cp/date/sha256sum，与 mac job 复用同一套语法
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 构建 Tauri 应用（NSIS 安装包）
+        run: npm run tauri build
+
+      - name: 规范化安装包文件名（GitHub assets 不支持非 ASCII 名）
+        run: |
+          mkdir -p release
+          VER=$(node -p "require('./package.json').version")
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe "release/ai-trainer-platform_${VER}_x64-setup.exe"
+          sha256sum release/*.exe > release/checksums-win.txt
+
+      - name: 发布到 Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           {
@@ -59,18 +110,10 @@ jobs:
             echo "$COMMIT_MSG"
             echo
             echo "---"
-            echo "- 安装包：未签名 arm64 .dmg，下载后首次打开需「右键 → 打开」绕过 Gatekeeper"
-            echo "- 完整性：下载后 \`shasum -a 256 -c checksums.txt\` 校验"
+            echo "- 安装包未签名：dmg 首次打开需「右键 → 打开」绕过 Gatekeeper；exe 安装时 SmartScreen 选「仍要运行」"
+            echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
           } > release-notes.md
-
-      - name: 发布到 Release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
-        run: |
-          gh release create "$TAG" \
-            --prerelease \
-            --title "训练师备考平台 $TAG" \
-            --notes-file release-notes.md \
-            release/*.dmg release/checksums.txt
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --prerelease --title "训练师备考平台 $TAG" --notes-file release-notes.md || true
+          gh release upload "$TAG" release/*.exe release/checksums-win.txt --clobber

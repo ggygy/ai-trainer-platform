@@ -4,6 +4,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, State};
 
+use super::{no_window, shell_command};
+
 pub struct JupyterState(pub Mutex<Option<Child>>);
 
 impl Default for JupyterState {
@@ -20,10 +22,14 @@ pub struct JupyterInfo {
 }
 
 fn find_jupyter() -> Option<String> {
-    let out = Command::new("/bin/zsh")
-        .args(["-lc", "which jupyter-lab 2>/dev/null || which jupyter-lab-lab 2>/dev/null || command -v jupyter-lab"])
-        .output()
-        .ok()?;
+    // 只认 jupyter-lab 可执行文件（`jupyter` 元启动器需要额外 "lab" 子命令，spawn 参数不同）
+    #[cfg(target_os = "macos")]
+    let cmd = "command -v jupyter-lab";
+    #[cfg(target_os = "windows")]
+    let cmd = "where jupyter-lab";
+    #[cfg(target_os = "linux")]
+    let cmd = "command -v jupyter-lab";
+    let out = shell_command(cmd).output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -46,12 +52,13 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
     };
 
     std::fs::create_dir_all(&dir).ok();
-    let Ok(mut child) = Command::new(&jup)
+    let mut command = Command::new(&jup);
+    command
         .args(["--no-browser", "--port=8889", &format!("--notebook-dir={dir}")])
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    else {
+        .stderr(Stdio::piped());
+    no_window(&mut command);
+    let Ok(mut child) = command.spawn() else {
         return JupyterInfo { running: false, url: String::new(), log: vec!["启动失败".into()] };
     };
 
@@ -77,6 +84,14 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
 #[tauri::command]
 pub fn jupyter_stop(state: State<'_, JupyterState>) {
     if let Some(mut child) = state.0.lock().unwrap().take() {
+        #[cfg(target_os = "windows")]
+        {
+            // jupyter 会拉起 kernel 子进程，kill 只杀本体；taskkill /T 连进程树一起清
+            let mut tk = Command::new("taskkill");
+            tk.args(["/PID", &child.id().to_string(), "/T", "/F"]);
+            no_window(&mut tk);
+            let _ = tk.output();
+        }
         let _ = child.kill();
         let _ = child.wait();
     }

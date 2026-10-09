@@ -3,6 +3,8 @@ use serde::Serialize;
 use std::process::{Command, Stdio};
 use tauri::{AppHandle, Emitter};
 
+use super::{no_window, shell_command};
+
 #[derive(Serialize)]
 pub struct ToolInfo {
     pub name: String,
@@ -32,12 +34,9 @@ fn norm(name: &str) -> String {
     name.to_lowercase().replace(['-', '_', '.'], "")
 }
 
-// 通过登录 shell 执行命令（GUI 应用不继承用户 PATH）
+// 执行一行 shell 命令，成功且 stdout 非空时返回 stdout（PATH 由 shell_command 保证）
 fn sh(cmd: &str) -> Option<String> {
-    let out = Command::new("/bin/zsh")
-        .args(["-lc", cmd])
-        .output()
-        .ok()?;
+    let out = shell_command(cmd).output().ok()?;
     if out.status.success() {
         let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if !s.is_empty() {
@@ -47,20 +46,49 @@ fn sh(cmd: &str) -> Option<String> {
     None
 }
 
+/// 解析可用的 Python 启动命令，返回 (参数前缀, --version 输出)。
+/// Windows 上 `python3` 常是 Microsoft Store 的跳转 stub（未装 Python 时也存在），
+/// 故按候选逐个探测 `--version`，只认真实输出；`py` 启动器需要 "-3" 参数。
+fn python_prefix() -> Option<(Vec<String>, String)> {
+    #[cfg(target_os = "macos")]
+    let candidates: &[&[&str]] = &[&["python3"]];
+    #[cfg(target_os = "windows")]
+    let candidates: &[&[&str]] = &[&["python"], &["py", "-3"]];
+    #[cfg(target_os = "linux")]
+    let candidates: &[&[&str]] = &[&["python3"]];
+
+    for cand in candidates {
+        if let Some(out) = sh(&format!("{} --version 2>&1", cand.join(" "))) {
+            if out.starts_with("Python ") {
+                return Some((cand.iter().map(|s| s.to_string()).collect(), out));
+            }
+        }
+    }
+    None
+}
+
 #[tauri::command]
 pub fn detect_env() -> Vec<ToolInfo> {
     let mut result: Vec<ToolInfo> = Vec::new();
 
-    let py_ver = sh("python3 --version 2>&1").unwrap_or_default();
-    let py_ok = py_ver.starts_with("Python ");
+    let Some((py, py_ver)) = python_prefix() else {
+        // 连 Python 都没有时其余项无从探测，全部标未安装
+        result.push(ToolInfo { name: "python".into(), ok: false, version: String::new(), detail: "系统运行时".into() });
+        for (name, detail) in TARGETS.iter().skip(1) {
+            result.push(ToolInfo { name: name.to_string(), ok: false, version: String::new(), detail: detail.to_string() });
+        }
+        return result;
+    };
+    let p = py.join(" ");
+
     result.push(ToolInfo {
         name: "python".into(),
-        ok: py_ok,
+        ok: true,
         version: py_ver.trim_start_matches("Python ").to_string(),
         detail: "系统运行时".into(),
     });
 
-    let pip_ver = sh("python3 -m pip --version 2>&1").unwrap_or_default();
+    let pip_ver = sh(&format!("{p} -m pip --version 2>&1")).unwrap_or_default();
     result.push(ToolInfo {
         name: "pip".into(),
         ok: pip_ver.starts_with("pip "),
@@ -69,7 +97,7 @@ pub fn detect_env() -> Vec<ToolInfo> {
     });
 
     // pip list 一次拿到全部已装包
-    let freeze = sh("python3 -m pip list --format=freeze 2>/dev/null").unwrap_or_default();
+    let freeze = sh(&format!("{p} -m pip list --format=freeze")).unwrap_or_default();
     let mut installed: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for line in freeze.lines() {
         if let Some((n, v)) = line.split_once("==") {
@@ -77,7 +105,7 @@ pub fn detect_env() -> Vec<ToolInfo> {
         }
     }
 
-    let jl_ver = sh("jupyter lab --version 2>/dev/null || jupyter-lab --version 2>/dev/null").unwrap_or_default();
+    let jl_ver = sh("jupyter lab --version || jupyter-lab --version").unwrap_or_default();
     let jl_ok = !jl_ver.is_empty();
     result.push(ToolInfo {
         name: "jupyterlab".into(),
@@ -105,19 +133,26 @@ pub fn install_packages(names: Vec<String>, app: AppHandle) {
         return;
     }
     std::thread::spawn(move || {
-        let list = names.join(" ");
         let emit_line = |app: &AppHandle, line: String| {
             let _ = app.emit("install-log", serde_json::json!({ "line": line }));
         };
 
-        emit_line(&app, format!("$ python3 -m pip install -U {list}"));
-        let mut ok = run_pip(&format!("python3 -m pip install --progress-bar off -U {list}"), &app);
+        let Some((py, _)) = python_prefix() else {
+            emit_line(&app, "[错误] 未找到可用的 Python，请先安装 Python 并勾选加入 PATH".into());
+            let _ = app.emit("install-done", serde_json::json!({ "ok": false }));
+            return;
+        };
+        let p = py.join(" ");
+        let list = names.join(" ");
 
-        // Homebrew Python（PEP 668）外部管理环境：自动降级重试
+        emit_line(&app, format!("$ {p} -m pip install -U {list}"));
+        let mut ok = run_pip(&format!("{p} -m pip install --progress-bar off -U {list}"), &app);
+
+        // PEP 668（如 Homebrew Python）外部管理环境：自动降级重试（见 ADR-0008）
         if !ok {
             emit_line(&app, "! 检测到外部管理环境，改用 --break-system-packages 重试".into());
             ok = run_pip(
-                &format!("python3 -m pip install --progress-bar off --break-system-packages -U {list}"),
+                &format!("{p} -m pip install --progress-bar off --break-system-packages -U {list}"),
                 &app,
             );
         }
@@ -127,12 +162,10 @@ pub fn install_packages(names: Vec<String>, app: AppHandle) {
 }
 
 fn run_pip(cmd: &str, app: &AppHandle) -> bool {
-    let Ok(mut child) = Command::new("/bin/zsh")
-        .args(["-lc", cmd])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    else {
+    let mut command = shell_command(cmd);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    no_window(&mut command);
+    let Ok(mut child) = command.spawn() else {
         let _ = app.emit("install-log", serde_json::json!({ "line": "[错误] 无法启动 pip" }));
         return false;
     };

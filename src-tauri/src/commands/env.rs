@@ -184,21 +184,27 @@ fn install_python_impl(app: &AppHandle) -> bool {
     }
 }
 
-/// Windows：winget 静默安装 → 失败回落 python.org 官方安装器直接下载
+/// Windows：winget 静默安装 → 失败回落 python.org 官方安装器直接下载。
+/// 全部直接 spawn（不经 cmd /C 拼串）：参数含引号/空格，cmd 引号会被 Rust 转义破坏（见 ADR-0011 修订）。
 #[cfg(target_os = "windows")]
 fn windows_python_install(app: &AppHandle) -> bool {
     let ver = PY_DL_VERSION;
     if sh("winget --version").is_some() {
         app.emit("install-log", serde_json::json!({ "line": "检测到 winget，正在静默安装（下载约 25MB，请耐心等待）…" })).ok();
-        let winget_ok = run_streamed(
-            &format!(
-                "winget install --id Python.Python.313 -e --silent --disable-interactivity \
-                 --accept-package-agreements --accept-source-agreements \
-                 --override \"/quiet InstallAllUsers=0 PrependPath=1 Include_test=0\""
-            ),
-            app,
-        );
-        if winget_ok {
+        let mut winget = Command::new("winget");
+        winget.args([
+            "install",
+            "--id",
+            "Python.Python.313",
+            "-e",
+            "--silent",
+            "--disable-interactivity",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+            "--override",
+            "/quiet InstallAllUsers=0 PrependPath=1 Include_test=0",
+        ]);
+        if run_streamed(winget, app) {
             app.emit("install-log", serde_json::json!({ "line": "✓ winget 安装完成，Python 位于 %LOCALAPPDATA%\\Programs\\Python" })).ok();
             return true;
         }
@@ -207,16 +213,18 @@ fn windows_python_install(app: &AppHandle) -> bool {
     let arch = if std::env::consts::ARCH == "aarch64" { "arm64" } else { "amd64" };
     let exe_name = format!("python-{ver}-{arch}.exe");
     let url = format!("https://www.python.org/ftp/python/{ver}/{exe_name}");
+    let tmp = std::env::temp_dir().join(&exe_name);
     app.emit("install-log", serde_json::json!({ "line": &format!("正在下载官方安装器 {url} …") })).ok();
-    if !run_streamed(&format!("curl -L -f -o \"%TEMP%\\{exe_name}\" \"{url}\""), app) {
+    let mut curl = Command::new("curl");
+    curl.args(["-L", "-f", "-o"]).arg(&tmp).arg(&url);
+    if !run_streamed(curl, app) {
         app.emit("install-log", serde_json::json!({ "line": "[错误] 下载失败：请检查网络后重试，或到 python.org 手动下载安装（勾选 Add python.exe to PATH）" })).ok();
         return false;
     }
-    app.emit("install-log", serde_json::json!({ "line": "正在安装（/passive 显示进度条，PrependPath=1 自动加入 PATH）…" })).ok();
-    let ok = run_streamed(
-        &format!("\"%TEMP%\\{exe_name}\" /passive InstallAllUsers=0 PrependPath=1 Include_test=0"),
-        app,
-    );
+    app.emit("install-log", serde_json::json!({ "line": &format!("正在安装 {}（/passive 显示进度条，PrependPath=1 自动加入 PATH）…", tmp.display()) })).ok();
+    let mut installer = Command::new(&tmp);
+    installer.args(["/passive", "InstallAllUsers=0", "PrependPath=1", "Include_test=0"]);
+    let ok = run_streamed(installer, app);
     if ok {
         app.emit("install-log", serde_json::json!({ "line": "✓ 安装完成，Python 位于 %LOCALAPPDATA%\\Programs\\Python" })).ok();
     }
@@ -230,7 +238,10 @@ fn macos_python_install(app: &AppHandle) -> bool {
     let pkg = format!("python-{ver}-macos11.pkg");
     let url = format!("https://www.python.org/ftp/python/{ver}/{pkg}");
     app.emit("install-log", serde_json::json!({ "line": &format!("正在下载官方安装包（约 65MB）：{url}") })).ok();
-    if !run_streamed(&format!("curl -L -f -o \"$HOME/Downloads/{pkg}\" \"{url}\""), app) {
+    if !run_streamed(
+        shell_command(&format!("curl -L -f -o \"$HOME/Downloads/{pkg}\" \"{url}\"")),
+        app,
+    ) {
         app.emit("install-log", serde_json::json!({ "line": "[错误] 下载失败：请检查网络后重试；也可手动下载后打开，或用 Homebrew：brew install python@3.13" })).ok();
         return false;
     }
@@ -242,6 +253,37 @@ fn macos_python_install(app: &AppHandle) -> bool {
     )
     .ok();
     true
+}
+
+/// 构建「python …」命令：PATH 候选（python / py -3 / python3）走用户 shell（macOS 需 zsh -l 补 PATH）；
+/// 全路径回落（Windows 常见目录探测出的 python.exe）直接 spawn，绕开 cmd 引号问题（见 ADR-0011 修订）。
+fn py_command(py: &[String], extra: &[&str]) -> Command {
+    let head = &py[0];
+    if head.contains('\\') || head.contains('/') {
+        let mut c = Command::new(head);
+        c.args(&py[1..]);
+        c.args(extra);
+        c
+    } else {
+        let mut s = shell_prefix(py);
+        for e in extra {
+            s.push(' ');
+            s.push_str(e);
+        }
+        shell_command(&s)
+    }
+}
+
+/// py_command 的捕获输出版（detect_env 探测用）
+fn sh_py(py: &[String], extra: &[&str]) -> Option<String> {
+    let out = py_command(py, extra).output().ok()?;
+    if out.status.success() {
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !s.is_empty() {
+            return Some(s);
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -256,7 +298,6 @@ pub fn detect_env() -> Vec<ToolInfo> {
         }
         return result;
     };
-    let p = shell_prefix(&py);
 
     result.push(ToolInfo {
         name: "python".into(),
@@ -265,7 +306,7 @@ pub fn detect_env() -> Vec<ToolInfo> {
         detail: "系统运行时".into(),
     });
 
-    let pip_ver = sh(&format!("{p} -m pip --version 2>&1")).unwrap_or_default();
+    let pip_ver = sh_py(&py, &["-m", "pip", "--version"]).unwrap_or_default();
     result.push(ToolInfo {
         name: "pip".into(),
         ok: pip_ver.starts_with("pip "),
@@ -274,7 +315,7 @@ pub fn detect_env() -> Vec<ToolInfo> {
     });
 
     // pip list 一次拿到全部已装包
-    let freeze = sh(&format!("{p} -m pip list --format=freeze")).unwrap_or_default();
+    let freeze = sh_py(&py, &["-m", "pip", "list", "--format=freeze"]).unwrap_or_default();
     let mut installed: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for line in freeze.lines() {
         if let Some((n, v)) = line.split_once("==") {
@@ -319,33 +360,33 @@ pub fn install_packages(names: Vec<String>, app: AppHandle) {
             let _ = app.emit("install-done", serde_json::json!({ "ok": false }));
             return;
         };
-        let p = shell_prefix(&py);
         let list = names.join(" ");
 
-        emit_line(&app, format!("$ {p} -m pip install -U {list}"));
-        let mut ok = run_streamed(&format!("{p} -m pip install --progress-bar off -U {list}"), &app);
+        emit_line(&app, format!("$ {} -m pip install -U {list}", py.join(" ")));
+        let mut extra: Vec<&str> = vec!["-m", "pip", "install", "--progress-bar", "off", "-U"];
+        extra.extend(names.iter().map(String::as_str));
+        let mut ok = run_streamed(py_command(&py, &extra), &app);
 
         // PEP 668（如 Homebrew Python）外部管理环境：自动降级重试（见 ADR-0008）
         if !ok {
             emit_line(&app, "! 检测到外部管理环境，改用 --break-system-packages 重试".into());
-            ok = run_streamed(
-                &format!("{p} -m pip install --progress-bar off --break-system-packages -U {list}"),
-                &app,
-            );
+            let n = extra.iter().position(|&a| a == "-U").unwrap_or(extra.len());
+            extra.insert(n, "--break-system-packages");
+            ok = run_streamed(py_command(&py, &extra), &app);
         }
         emit_line(&app, if ok { "$ 安装完成 ✓".into() } else { "$ 安装失败，请查看上方日志".into() });
         let _ = app.emit("install-done", serde_json::json!({ "ok": ok }));
     });
 }
 
-/// 流式执行一条 shell 命令：stdout/stderr 逐行 emit 到 install-log，返回是否成功退出。
-/// pip 安装、winget/curl 下载安装 Python 共用。
-fn run_streamed(cmd: &str, app: &AppHandle) -> bool {
-    let mut command = shell_command(cmd);
+/// 流式执行一条命令：stdout/stderr 逐行 emit 到 install-log，返回是否成功退出。
+/// 调用方自行构建 Command——Windows 上含参数/引号的命令必须直接 spawn，
+/// 走 cmd /C 拼串时内层引号会被 Rust 的 `\"` 转义破坏（见 ADR-0011 修订）。
+fn run_streamed(mut command: Command, app: &AppHandle) -> bool {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     no_window(&mut command);
     let Ok(mut child) = command.spawn() else {
-        let _ = app.emit("install-log", serde_json::json!({ "line": "[错误] 无法启动 pip" }));
+        let _ = app.emit("install-log", serde_json::json!({ "line": "[错误] 无法启动命令" }));
         return false;
     };
 

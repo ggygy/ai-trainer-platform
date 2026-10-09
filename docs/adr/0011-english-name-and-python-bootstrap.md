@@ -38,3 +38,9 @@ issue #1 暴露的两类问题 + 用户反馈：
 - 中文产品名引发的安装器/资产名问题这一类坑被根除。
 - 新 Windows/macOS 用户从零到「依赖全部就绪」全程不离开应用。
 - 章节例题池顺序各不相同但确定性可复现；E2E T7 依赖的头部三题（打标段）保持稳定。
+
+## 修订（2026-10-09 · Windows 实机反馈）
+
+首版 winget/curl/安装器调用走 `cmd /C "…"arg"…"` 拼串，实机全军覆没：Rust std 对含空格参数按 MSVCRT 规则把内层引号转义成 `\"`，而 cmd 把 `"` 当引号开关不认 `\"`——curl 收到带杂引号的 URL 报 `(3) Port number was not a decimal number`，winget `--override` 同理被截断。
+
+**修订决策：Windows 上凡参数含空格或引号的命令一律直接 `Command::new(prog).args([...])` spawn，不走 cmd 拼串。** `run_streamed` 改为接收 `Command`；winget/curl/安装器直接执行（临时路径取 `std::env::temp_dir()`）；python「全路径回落」命中时 pip 调用同样直接 spawn（`py_command()` 按 python 是否为路径选 shell/直spawn 分支）。cmd 拼串只保留给无内层引号的简单探测（`python --version`、`winget --version`）与 macOS zsh（zsh 以单个参数接收整条命令再自行解析，引号语义正确）。

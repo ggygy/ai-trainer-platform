@@ -19,6 +19,13 @@ xattr -cr "/Applications/AI Trainer Prep.app"
 
 **Windows**（`*_x64-setup.exe`）：未做代码签名，SmartScreen 弹出时点「更多信息 → 仍要运行」。
 
+## 发版流程
+
+- **日常快照**：push 到 `main` 自动构建 Pre-release（tag `v版本-日期-sha`），用于随时尝鲜；
+- **正式发版**：GitHub → Actions → 「发布版本」→ 输入版本号（如 `0.2.0`）→ 自动写入
+  package.json / tauri.conf.json / Cargo.toml、打 tag `v0.2.0`、双平台构建，并发布
+  **正式 Release（Latest 标记，非预发布）**——安装包文件名与产物的版本号随之真正更新。
+
 ## 开发
 
 项目结构、常用命令、领域要点与约定见 [AGENTS.md](AGENTS.md)；

@@ -1,11 +1,17 @@
-# 每次推送到 main（或手动触发）：macOS + Windows 双平台打 Tauri 安装包，合入同一个 Release
-# 产物：dmg（arm64，配置了 APPLE_* Secrets 时自动 Developer ID 签名+公证）+ NSIS exe（x64），下载见 Releases 页 assets
+# 每次推送到 main：快照构建（预发布 tag vX.Y.Z-日期-sha）；release.yml 触发时为正式发布
+# （tag 形如 v0.2.0，Release 标记 latest 非预发布）。产物：dmg（arm64，配置了 APPLE_* Secrets
+# 时自动 Developer ID 签名+公证）+ NSIS exe（x64），下载见 Releases 页 assets
 name: 构建发布
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "正式发布 tag（如 v0.2.0）；留空则为快照预发布"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -20,6 +26,8 @@ jobs:
     env:
       # 是否配置了签名 Secrets（控制签名校验步骤与 Release 说明文案）
       SIGNED: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      # release.yml 传入的正式发布 tag；push 触发时为空 → 快照预发布
+      RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -70,9 +78,14 @@ jobs:
           cp src-tauri/target/release/bundle/dmg/*.dmg "release/ai-trainer-platform_${VER}_aarch64.dmg"
           shasum -a 256 release/*.dmg > release/checksums-mac.txt
 
-      - name: 计算发布标签（版本-日期-短SHA）
+      - name: 计算发布标签（正式 tag 优先，否则快照 版本-日期-短SHA）
         id: tag
-        run: echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ -n "$RELEASE_TAG" ]; then
+            echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: 发布到 Release assets
         env:
@@ -97,12 +110,19 @@ jobs:
             echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
           } > release-notes.md
-          gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --prerelease --title "AI Trainer Prep $TAG" --notes-file release-notes.md || true
+          if [ -n "$RELEASE_TAG" ]; then
+            gh release view "$TAG" >/dev/null 2>&1 || \
+              gh release create "$TAG" --latest --title "AI Trainer Prep $TAG" --notes-file release-notes.md
+          else
+            gh release view "$TAG" >/dev/null 2>&1 || \
+              gh release create "$TAG" --prerelease --title "AI Trainer Prep $TAG" --notes-file release-notes.md || true
+          fi
           gh release upload "$TAG" release/*.dmg release/checksums-mac.txt --clobber
 
   build-windows:
     runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ inputs.release_tag }}
     defaults:
       run:
         shell: bash  # git-bash 自带 cp/date/sha256sum，与 mac job 复用同一套语法
@@ -133,9 +153,14 @@ jobs:
           cp src-tauri/target/release/bundle/nsis/*-setup.exe "release/ai-trainer-platform_${VER}_x64-setup.exe"
           sha256sum release/*.exe > release/checksums-win.txt
 
-      - name: 计算发布标签（版本-日期-短SHA）
+      - name: 计算发布标签（正式 tag 优先，否则快照 版本-日期-短SHA）
         id: tag
-        run: echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [ -n "$RELEASE_TAG" ]; then
+            echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: 发布到 Release assets
         env:
@@ -155,6 +180,11 @@ jobs:
             echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
           } > release-notes.md
-          gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --prerelease --title "AI Trainer Prep $TAG" --notes-file release-notes.md || true
+          if [ -n "$RELEASE_TAG" ]; then
+            gh release view "$TAG" >/dev/null 2>&1 || \
+              gh release create "$TAG" --latest --title "AI Trainer Prep $TAG" --notes-file release-notes.md
+          else
+            gh release view "$TAG" >/dev/null 2>&1 || \
+              gh release create "$TAG" --prerelease --title "AI Trainer Prep $TAG" --notes-file release-notes.md || true
+          fi
           gh release upload "$TAG" release/*.exe release/checksums-win.txt --clobber

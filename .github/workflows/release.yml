@@ -1,0 +1,61 @@
+# 手动触发：正式版本发布。输入新版本号 → 写入三处版本文件 → 提交并打 tag vX.Y.Z → 触发 build.yml
+# → 双平台构建 → 合成正式 Release（--latest，非预发布）。日常 push 仍走 build.yml 的快照预发布。
+name: 发布版本
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "新版本号（如 0.2.0）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 校验并写入版本号（package.json / tauri.conf.json / Cargo.toml）
+        run: |
+          echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "::error::版本号需形如 0.2.0，实际：$VERSION"; exit 1; }
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" package.json
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+          sed -i "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          grep -h "version" package.json src-tauri/tauri.conf.json | head -2
+          grep '^version' src-tauri/Cargo.toml
+
+      - name: 刷新 Cargo.lock 中的本包版本
+        working-directory: src-tauri
+        run: cargo update -p ai-trainer-platform --quiet
+
+      - name: 提交并打 tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          git commit -m "chore(release): v$VERSION"
+          git tag "v$VERSION"
+          for i in 1 2 3 4 5; do
+            out=$(git push origin HEAD:main "v$VERSION" 2>&1)
+            echo "$out" | grep -q "main -> main" && { echo "pushed"; break; } || { echo "retry $i"; sleep 8; }
+          done
+
+      - name: 触发「构建发布」（正式 Release，--latest 非预发布）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in 1 2 3 4 5; do
+            gh workflow run build.yml --ref main -f release_tag="v$VERSION" && { echo "已触发"; break; } || { echo "retry $i"; sleep 8; }
+          done

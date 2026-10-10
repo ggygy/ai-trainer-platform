@@ -16,6 +16,7 @@
 | [0010](0010-windows-platform.md) | Windows 支持：cmd/注册表 PATH + NSIS + taskkill 进程树 | 已接受 | 2026-10-09 |
 | [0011](0011-english-name-and-python-bootstrap.md) | 英文产品名 + 应用内一键安装 Python 运行时 + 章节刷题顺序差异化 | 已接受 | 2026-10-09 |
 | [0012](0012-macos-signing-notarization.md) | macOS Developer ID 签名+公证接入 CI（Secrets 缺省自动降级未签名） | 已接受 | 2026-10-10 |
+| [0013](0013-versioned-releases.md) | 版本化发布：push 快照预发布 + 手动触发正式 Release（版本号三处同步） | 已接受 | 2026-10-10 |
 
 ## 新增 ADR 的约定
 

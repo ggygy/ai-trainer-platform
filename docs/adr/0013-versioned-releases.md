@@ -16,8 +16,9 @@ Releases 页清一色预发布快照，没有「最新正式版」的概念。
   2. 提交 `chore(release): vX.Y.Z` 并打 tag，推回 main；
   3. `gh workflow run build.yml -f release_tag=vX.Y.Z` 触发双平台构建；
   4. build.yml 检测到 `release_tag` 输入：tag 直接采用、Release 用 `--latest` 发布（非预发布）。
-- push 触发的 bump 提交也会启动一个快照构建，与正式构建共享 `concurrency: build-main`
-  （cancel-in-progress），后者会取消前者，不产生重复产物。
+- push 触发的 bump 提交也会启动一个快照构建；正式构建与快照构建分属不同并发组
+  （`build-main-vX.Y.Z` vs `build-main-snapshot`），push 不会顶掉正在跑的正式构建
+  （首版共用组导致正式构建被取消，已修）。
 
 ## 后果
 

@@ -62,7 +62,9 @@ jobs:
             cat commit-msg.txt
             echo
             echo "---"
-            echo "- 安装包未签名：dmg 首次打开需「右键 → 打开」绕过 Gatekeeper；exe 安装时 SmartScreen 选「仍要运行」"
+            echo "- macOS 首次打开：未做苹果签名/公证，浏览器下载后 Gatekeeper 会提示「已损坏」。App 拖入「应用程序」后终端执行一次："
+            echo "  \`xattr -cr \"/Applications/AI Trainer Prep.app\"\`（新版 macOS 上「右键 → 打开」已无效）"
+            echo "- Windows 安装：未做代码签名，SmartScreen 弹出时点「更多信息 → 仍要运行」"
             echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
           } > release-notes.md
@@ -118,7 +120,9 @@ jobs:
             echo "$COMMIT_MSG"
             echo
             echo "---"
-            echo "- 安装包未签名：dmg 首次打开需「右键 → 打开」绕过 Gatekeeper；exe 安装时 SmartScreen 选「仍要运行」"
+            echo "- macOS 首次打开：未做苹果签名/公证，浏览器下载后 Gatekeeper 会提示「已损坏」。App 拖入「应用程序」后终端执行一次："
+            echo "  \`xattr -cr \"/Applications/AI Trainer Prep.app\"\`（新版 macOS 上「右键 → 打开」已无效）"
+            echo "- Windows 安装：未做代码签名，SmartScreen 弹出时点「更多信息 → 仍要运行」"
             echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
           } > release-notes.md

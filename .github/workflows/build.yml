@@ -1,6 +1,10 @@
 # 每次推送到 main：快照构建（预发布 tag vX.Y.Z-日期-sha）；release.yml 触发时为正式发布
 # （tag 形如 v0.2.0，Release 标记 latest 非预发布）。产物：dmg（arm64，配置了 APPLE_* Secrets
-# 时自动 Developer ID 签名+公证）+ NSIS exe（x64），下载见 Releases 页 assets
+# 时自动 Developer ID 签名+公证）+ NSIS exe（x64），下载见 Releases 页 assets。
+#
+# 发布集中在末尾的 publish job：两个平台都构建成功、产物经由 artifacts 汇合后才创建 Release。
+# 早期版本由各平台 job 各自创建/上传 Release，中途被取消（如同并发组内新 push 抢占）会留下
+# 「只有 dmg 没有 exe」的半成品 Release——这正是「Windows 包不见了」观感的来源。
 name: 构建发布
 
 on:
@@ -16,18 +20,21 @@ on:
 permissions:
   contents: write
 
+# 正式发布（release.yml 传入 release_tag）独占并发组，不被后续 push 的快照构建取消；
+# 快照构建互相取消，且取消不会再产生半成品 Release（见 publish job）
 concurrency:
-  group: build-${{ github.ref }}
+  group: build-${{ github.ref }}-${{ inputs.release_tag || 'snapshot' }}
   cancel-in-progress: true
 
 jobs:
   build-macos:
     runs-on: macos-latest
+    outputs:
+      # publish 据此决定 Release 说明里的 Gatekeeper 文案
+      signed: ${{ steps.sign_flag.outputs.signed }}
     env:
       # 是否配置了签名 Secrets（控制签名校验步骤与 Release 说明文案）
       SIGNED: ${{ secrets.APPLE_CERTIFICATE != '' }}
-      # release.yml 传入的正式发布 tag；push 触发时为空 → 快照预发布
-      RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -78,51 +85,18 @@ jobs:
           cp src-tauri/target/release/bundle/dmg/*.dmg "release/ai-trainer-platform_${VER}_aarch64.dmg"
           shasum -a 256 release/*.dmg > release/checksums-mac.txt
 
-      - name: 计算发布标签（正式 tag 优先，否则快照 版本-日期-短SHA）
-        id: tag
-        run: |
-          if [ -n "$RELEASE_TAG" ]; then
-            echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-          fi
+      - name: 记录签名状态
+        id: sign_flag
+        run: echo "signed=$SIGNED" >> "$GITHUB_OUTPUT"
 
-      - name: 发布到 Release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
-        run: |
-          echo "$COMMIT_MSG" > commit-msg.txt
-          {
-            echo "自动构建 · 提交 ${{ github.sha }}"
-            echo
-            cat commit-msg.txt
-            echo
-            echo "---"
-            if [ "$SIGNED" = "true" ]; then
-              echo "- macOS 包已签名并公证（Developer ID），下载后可直接打开；首次启动仍弹「已下载」提示时，右键 → 打开一次即可"
-            else
-              echo "- macOS 首次打开：未做苹果签名/公证，浏览器下载后 Gatekeeper 会提示「已损坏」。App 拖入「应用程序」后终端执行一次："
-              echo "  \`xattr -cr \"/Applications/AI Trainer Prep.app\"\`（新版 macOS 上「右键 → 打开」已无效）"
-            fi
-            echo "- Windows 安装：未做代码签名，SmartScreen 弹出时点「更多信息 → 仍要运行」"
-            echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
-            echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
-          } > release-notes.md
-          if [ -n "$RELEASE_TAG" ]; then
-            gh release view "$TAG" >/dev/null 2>&1 || \
-              gh release create "$TAG" --latest --title "AI Trainer Prep $TAG" --notes-file release-notes.md
-          else
-            gh release view "$TAG" >/dev/null 2>&1 || \
-              gh release create "$TAG" --prerelease --title "AI Trainer Prep $TAG" --notes-file release-notes.md || true
-          fi
-          gh release upload "$TAG" release/*.dmg release/checksums-mac.txt --clobber
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-dist
+          path: release/
+          retention-days: 3
 
   build-windows:
     runs-on: windows-latest
-    env:
-      RELEASE_TAG: ${{ inputs.release_tag }}
     defaults:
       run:
         shell: bash  # git-bash 自带 cp/date/sha256sum，与 mac job 复用同一套语法
@@ -153,6 +127,32 @@ jobs:
           cp src-tauri/target/release/bundle/nsis/*-setup.exe "release/ai-trainer-platform_${VER}_x64-setup.exe"
           sha256sum release/*.exe > release/checksums-win.txt
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win-dist
+          path: release/
+          retention-days: 3
+
+  publish:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    env:
+      # release.yml 传入的正式发布 tag；push 触发时为空 → 快照预发布
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      SIGNED: ${{ needs.build-macos.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-dist
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: win-dist
+          path: dist
+
       - name: 计算发布标签（正式 tag 优先，否则快照 版本-日期-短SHA）
         id: tag
         run: |
@@ -162,20 +162,24 @@ jobs:
             echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: 发布到 Release assets
+      - name: 创建 Release 并上传全部产物
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
+          COMMIT_MSG=$(git log -1 --pretty=%s)
           {
-            echo "自动构建 · 提交 ${{ github.sha }}"
+            echo "自动构建 · 提交 ${GITHUB_SHA::7}"
             echo
             echo "$COMMIT_MSG"
             echo
             echo "---"
-            echo "- macOS 首次打开：未做苹果签名/公证，浏览器下载后 Gatekeeper 会提示「已损坏」。App 拖入「应用程序」后终端执行一次："
-            echo "  \`xattr -cr \"/Applications/AI Trainer Prep.app\"\`（新版 macOS 上「右键 → 打开」已无效）"
+            if [ "$SIGNED" = "true" ]; then
+              echo "- macOS 包已签名并公证（Developer ID），下载后可直接打开；首次启动仍弹「已下载」提示时，右键 → 打开一次即可"
+            else
+              echo "- macOS 首次打开：未做苹果签名/公证，浏览器下载后 Gatekeeper 会提示「已损坏」。App 拖入「应用程序」后终端执行一次："
+              echo "  \`xattr -cr \"/Applications/AI Trainer Prep.app\"\`（新版 macOS 上「右键 → 打开」已无效）"
+            fi
             echo "- Windows 安装：未做代码签名，SmartScreen 弹出时点「更多信息 → 仍要运行」"
             echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
@@ -185,6 +189,6 @@ jobs:
               gh release create "$TAG" --latest --title "AI Trainer Prep $TAG" --notes-file release-notes.md
           else
             gh release view "$TAG" >/dev/null 2>&1 || \
-              gh release create "$TAG" --prerelease --title "AI Trainer Prep $TAG" --notes-file release-notes.md || true
+              gh release create "$TAG" --prerelease --title "AI Trainer Prep $TAG" --notes-file release-notes.md
           fi
-          gh release upload "$TAG" release/*.exe release/checksums-win.txt --clobber
+          gh release upload "$TAG" dist/* --clobber

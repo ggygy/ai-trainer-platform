@@ -21,6 +21,7 @@ const TARGETS: &[(&str, &str)] = &[
     ("numpy", "数值计算"),
     ("scikit-learn", "机器学习建模"),
     ("matplotlib", "统计可视化绘图"),
+    ("openpyxl", "Excel 读取（.xlsx 素材）"),
     ("onnxruntime", "ONNX 模型推理"),
     ("Pillow", "图像读取处理"),
     ("opencv-python", "图像处理（cv2）"),

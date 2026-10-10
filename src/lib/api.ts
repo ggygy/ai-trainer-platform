@@ -99,6 +99,7 @@ function mockEnv(): ToolInfo[] {
     { name: "numpy", ok: true, version: "1.26.4", detail: "数值计算" },
     { name: "scikit-learn", ok: false, version: "", detail: "机器学习建模" },
     { name: "matplotlib", ok: true, version: "3.8.4", detail: "统计可视化绘图" },
+    { name: "openpyxl", ok: true, version: "3.1.5", detail: "Excel 数据读取（.xlsx 素材）" },
     { name: "onnxruntime", ok: false, version: "", detail: "ONNX 模型推理" },
     { name: "Pillow", ok: true, version: "10.3.0", detail: "图像读取处理" },
     { name: "opencv-python", ok: false, version: "", detail: "图像处理（cv2）" },

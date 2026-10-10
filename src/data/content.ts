@@ -142,6 +142,7 @@ export const DEPENDENCIES: DepItem[] = [
   { pip: "numpy", use: "数值计算", version: "1.26" },
   { pip: "scikit-learn", use: "机器学习建模", version: "1.4" },
   { pip: "matplotlib", use: "统计可视化绘图", version: "3.8" },
+  { pip: "openpyxl", use: "Excel 数据读取（.xlsx 素材）", version: "3.1" },
   { pip: "onnxruntime", use: "ONNX 模型推理", version: "1.17" },
   { pip: "Pillow", use: "图像读取处理", version: "10.2" },
   { pip: "opencv-python", use: "图像处理（cv2）", version: "4.9" },

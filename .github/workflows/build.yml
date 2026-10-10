@@ -38,9 +38,10 @@ jobs:
         run: npm ci
 
       # beforeBuildCommand 会先跑 npm run build（tsc 严格检查），前端类型错误即失败。
-      # 配置了 APPLE_* Secrets 时，tauri-bundler 自动：导入证书到临时钥匙串 → Developer ID 签名
-      # （含 hardened runtime）→ notarytool 公证 → staple 订书；Secrets 缺省时保持未签名行为不变
-      - name: 构建 Tauri 应用
+      # 两步二选一：tauri-bundler 只要检测到 APPLE_* 环境变量存在（哪怕为空）就会走签名路径，
+      # 因此未配置 Secrets 时绝不能注入空变量（否则 security import 空证书直接失败）
+      - name: 构建 Tauri 应用（签名+公证）
+        if: env.SIGNED == 'true'
         run: npm run tauri build
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -49,6 +50,10 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: 构建 Tauri 应用
+        if: env.SIGNED != 'true'
+        run: npm run tauri build
 
       - name: 校验签名与公证
         if: env.SIGNED == 'true'

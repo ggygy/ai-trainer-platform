@@ -31,6 +31,20 @@ enum JupyterLaunch {
 }
 
 fn resolve_launch() -> Option<JupyterLaunch> {
+    // ① 应用自管 venv（uv）里的 jupyter 最可靠：版本对、权限对、不依赖 PATH
+    if let Some(py) = super::env::app_venv_python() {
+        let mut probe = Command::new(&py);
+        probe.args(["-m", "jupyter", "lab", "--version"]);
+        no_window(&mut probe);
+        let ok = probe
+            .output()
+            .map(|o| o.status.success() && !o.stdout.is_empty())
+            .unwrap_or(false);
+        if ok {
+            return Some(JupyterLaunch::Module(py));
+        }
+    }
+    // ② PATH 上的 jupyter-lab
     #[cfg(target_os = "macos")]
     let cmd = "command -v jupyter-lab";
     #[cfg(target_os = "windows")]
@@ -45,7 +59,8 @@ fn resolve_launch() -> Option<JupyterLaunch> {
             }
         }
     }
-    // 模块方式：python 可执行 + `python -m jupyter lab --version` 探活
+    // ③ 系统解释器模块方式：包可能装在用户目录（mac CLT ~/Library/Python/3.x/bin、
+    // Windows %APPDATA%\Python\Python3x\Scripts 都不在 PATH）
     let py = python_exe_path()?;
     let mut probe = Command::new(&py);
     probe.args(["-m", "jupyter", "lab", "--version"]);

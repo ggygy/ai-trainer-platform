@@ -50,6 +50,19 @@ fn sh(cmd: &str) -> Option<String> {
 /// Windows 上 `python3` 常是 Microsoft Store 的跳转 stub（未装 Python 时也存在），
 /// 故按候选逐个探测 `--version`，只认真实输出；`py` 启动器需要 "-3" 参数。
 fn python_prefix() -> Option<(Vec<String>, String)> {
+    // ① 应用自管 venv（uv 创建）优先：绝对路径直接探测，绕开 GUI PATH、用户站点目录与系统 Python 版本问题
+    if let Some(py) = app_venv_python() {
+        let mut c = Command::new(&py);
+        c.arg("--version");
+        no_window(&mut c);
+        if let Ok(out) = c.output() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if out.status.success() && s.starts_with("Python ") {
+                return Some((vec![py], s));
+            }
+        }
+    }
+
     #[cfg(target_os = "macos")]
     let candidates: &[&[&str]] = &[&["python3"]];
     #[cfg(target_os = "windows")]
@@ -113,6 +126,109 @@ fn shell_prefix(py: &[String]) -> String {
     }
 }
 
+// ── uv 托管环境（ADR-0014）───────────────────────────────────────────────
+// 系统 Python 的坑太多：mac 命令行工具 Python 3.9（pip 21、PEP 668、脚本目录不在 PATH）、
+// Windows 未加 PATH / Store stub。应用改为自管：uv（用户级安装）→ uv 装 Python 3.13 →
+// 应用专属 venv → 依赖全装 venv 里。检测 / 安装 / Jupyter 一律优先这个环境。
+
+/// 应用专属 venv 位置：固定路径，检测与启动都直接指向它
+fn app_venv_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| std::env::var("USERPROFILE").unwrap_or_default());
+        std::path::PathBuf::from(base).join("AI Trainer Prep").join("venv")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        std::path::PathBuf::from(base).join("Library/Application Support/AI Trainer Prep/venv")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        std::path::PathBuf::from(base).join(".local/share/ai-trainer-prep/venv")
+    }
+}
+
+fn venv_python(dir: &std::path::Path) -> std::path::PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        dir.join("Scripts").join("python.exe")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        dir.join("bin").join("python")
+    }
+}
+
+/// 应用 venv 的 python（存在才返回），绝对路径可直接 spawn
+pub(crate) fn app_venv_python() -> Option<String> {
+    let p = venv_python(&app_venv_dir());
+    p.is_file().then(|| p.to_string_lossy().to_string())
+}
+
+/// 定位 uv：先 PATH，再官方安装脚本的用户级默认位置 ~/.local/bin（GUI 进程 PATH 通常没有它）
+fn uv_path() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    let cmd = "where uv";
+    #[cfg(not(target_os = "windows"))]
+    let cmd = "command -v uv";
+    if let Some(out) = sh(cmd) {
+        if let Some(p) = out.lines().next().map(str::trim) {
+            if !p.is_empty() {
+                return Some(p.to_string());
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    let cand = std::env::var("USERPROFILE").ok().map(|h| std::path::PathBuf::from(h).join(".local/bin/uv.exe"));
+    #[cfg(not(target_os = "windows"))]
+    let cand = std::env::var("HOME").ok().map(|h| std::path::PathBuf::from(h).join(".local/bin/uv"));
+    let cand = cand?;
+    cand.is_file().then(|| cand.to_string_lossy().to_string())
+}
+
+/// 确保 uv + 应用 venv 就绪，返回 venv python 绝对路径。
+/// uv 缺失时用官方脚本装到用户目录（无需管理员）；失败返回 None 由调用方走平台兜底。
+fn ensure_uv_and_venv(app: &AppHandle) -> Option<String> {
+    let emit = |line: &str| {
+        let _ = app.emit("install-log", serde_json::json!({ "line": line }));
+    };
+    let uv = match uv_path() {
+        Some(u) => u,
+        None => {
+            emit("未找到 uv，正在安装（Astral 官方脚本，用户级安装，无需管理员）…");
+            #[cfg(target_os = "windows")]
+            {
+                let mut c = Command::new("powershell");
+                c.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://astral.sh/uv/install.ps1 | iex"]);
+                run_streamed(c, app);
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                run_streamed(shell_command("curl -LsSf https://astral.sh/uv/install.sh | sh"), app);
+            }
+            uv_path()?
+        }
+    };
+    emit(&format!("✓ uv 就绪：{uv}"));
+
+    let venv = app_venv_dir();
+    let vpy = venv_python(&venv);
+    if !vpy.is_file() {
+        emit("正在安装 uv 托管的 Python 3.13（用户级，约 30MB，无需管理员）…");
+        let mut c = Command::new(&uv);
+        c.args(["python", "install", "3.13"]);
+        run_streamed(c, app);
+        emit(&format!("正在创建应用专属虚拟环境：{}", venv.display()));
+        let mut c = Command::new(&uv);
+        c.args(["venv"]).arg(&venv).args(["--python", "3.13"]);
+        run_streamed(c, app);
+    }
+    let s = vpy.to_string_lossy().to_string();
+    vpy.is_file().then_some(s)
+}
+
 /// 未找到 Python 时的平台化指引（写入安装日志）
 fn python_missing_hint() -> &'static str {
     #[cfg(target_os = "windows")]
@@ -147,12 +263,19 @@ pub fn install_python(app: AppHandle) {
         let emit_line = |line: &str| {
             let _ = app.emit("install-log", serde_json::json!({ "line": line }));
         };
-        if python_prefix().is_some() {
-            emit_line("✓ 已检测到可用的 Python，无需安装");
+        // ① uv 托管：一条路同时解决 Python 运行时 + venv，绕开系统 Python 的版本/权限/PATH 坑
+        if let Some(vpy) = ensure_uv_and_venv(&app) {
+            emit_line(&format!("✓ 应用专属 Python 环境就绪：{vpy}"));
             let _ = app.emit("install-done", serde_json::json!({ "ok": true }));
             return;
         }
-        emit_line(&format!("$ 开始安装 Python {PY_DL_VERSION}（按平台选择方式）…"));
+
+        if python_prefix().is_some() {
+            emit_line("✓ 已检测到可用的 Python，且 uv 不可用无需安装");
+            let _ = app.emit("install-done", serde_json::json!({ "ok": true }));
+            return;
+        }
+        emit_line(&format!("$ uv 不可用，按平台尝试安装 Python {PY_DL_VERSION}…"));
         let ok = install_python_impl(&app);
         emit_line(
             if ok {
@@ -335,10 +458,13 @@ pub fn detect_env() -> Vec<ToolInfo> {
     });
 
     let pip_ver = sh_py(&py, &["-m", "pip", "--version"]).unwrap_or_default();
+    // uv venv 不带 pip 模块，但包管理由 uv pip 承担——按「由 uv 提供」标记就绪，避免误报缺失
+    let is_venv = app_venv_python().as_deref() == Some(py[0].as_str());
+    let pip_ok = pip_ver.starts_with("pip ") || is_venv;
     result.push(ToolInfo {
         name: "pip".into(),
-        ok: pip_ver.starts_with("pip "),
-        version: pip_ver.split_whitespace().nth(1).unwrap_or("").to_string(),
+        ok: pip_ok,
+        version: if is_venv && !pip_ver.starts_with("pip ") { "uv".into() } else { pip_ver.split_whitespace().nth(1).unwrap_or("").to_string() },
         detail: "包管理器".into(),
     });
 
@@ -383,12 +509,27 @@ pub fn install_packages(names: Vec<String>, app: AppHandle) {
             let _ = app.emit("install-log", serde_json::json!({ "line": line }));
         };
 
+        let list = names.join(" ");
+
+        // ① uv 托管：依赖装进应用专属 venv，不受 PEP 668 / 目录权限 / 用户站点 / PATH 影响（ADR-0014）
+        if let Some(vpy) = ensure_uv_and_venv(&app) {
+            emit_line(&app, format!("$ uv pip install -U {list}（应用专属环境 {vpy}）"));
+            let uv = uv_path().expect("ensure_uv_and_venv 成功则 uv 必在");
+            let mut c = Command::new(&uv);
+            c.args(["pip", "install", "--python", &vpy, "--upgrade"]);
+            c.args(names.iter().map(String::as_str));
+            let ok = run_streamed(c, &app);
+            emit_line(&app, if ok { "$ 安装完成 ✓".into() } else { "$ 安装失败，请查看上方日志".into() });
+            let _ = app.emit("install-done", serde_json::json!({ "ok": ok }));
+            return;
+        }
+        emit_line(&app, "! uv 环境创建失败，回退系统 pip 安装".into());
+
         let Some((py, _)) = python_prefix() else {
             emit_line(&app, format!("[错误] {}", python_missing_hint()));
             let _ = app.emit("install-done", serde_json::json!({ "ok": false }));
             return;
         };
-        let list = names.join(" ");
 
         emit_line(&app, format!("$ {} -m pip install -U {list}", py.join(" ")));
         let mut extra: Vec<&str> = vec!["-m", "pip", "install", "--progress-bar", "off", "-U"];

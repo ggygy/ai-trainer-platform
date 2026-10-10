@@ -7,8 +7,9 @@ Tauri 2 桌面应用：官方真实题库（理论 900 题 + 官方模拟卷 190
 
 每次推送到 `main` 会自动构建并发布新版本，到 [Releases](../../releases) 页面下载最新的安装包。
 
-**macOS**（`*_aarch64.dmg`，Apple Silicon）：安装包未做苹果签名/公证，浏览器下载后
-Gatekeeper 会拦截并提示「已损坏，无法打开」。把 App 拖入「应用程序」后，在终端执行一次：
+**macOS**（`*_aarch64.dmg`，Apple Silicon）：配置了 Apple 签名 Secrets 的构建已做
+Developer ID 签名 + 公证，下载后可直接打开。早期/未签名的版本会被 Gatekeeper 拦截并提示
+「已损坏，无法打开」——把 App 拖入「应用程序」后，在终端执行一次：
 
 ```bash
 xattr -cr "/Applications/AI Trainer Prep.app"

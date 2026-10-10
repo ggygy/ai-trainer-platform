@@ -15,6 +15,7 @@
 | [0009](0009-zustand-state.md) | 状态管理迁移 zustand persist（key/介质不变，信封格式迁移） | 已接受 | 2026-10-09 |
 | [0010](0010-windows-platform.md) | Windows 支持：cmd/注册表 PATH + NSIS + taskkill 进程树 | 已接受 | 2026-10-09 |
 | [0011](0011-english-name-and-python-bootstrap.md) | 英文产品名 + 应用内一键安装 Python 运行时 + 章节刷题顺序差异化 | 已接受 | 2026-10-09 |
+| [0012](0012-macos-signing-notarization.md) | macOS Developer ID 签名+公证接入 CI（Secrets 缺省自动降级未签名） | 已接受 | 2026-10-10 |
 
 ## 新增 ADR 的约定
 

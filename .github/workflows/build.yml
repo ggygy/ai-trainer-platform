@@ -1,5 +1,5 @@
 # 每次推送到 main（或手动触发）：macOS + Windows 双平台打 Tauri 安装包，合入同一个 Release
-# 产物：未签名 dmg（arm64）+ NSIS exe（x64），下载见 Releases 页 assets
+# 产物：dmg（arm64，配置了 APPLE_* Secrets 时自动 Developer ID 签名+公证）+ NSIS exe（x64），下载见 Releases 页 assets
 name: 构建发布
 
 on:
@@ -17,6 +17,9 @@ concurrency:
 jobs:
   build-macos:
     runs-on: macos-latest
+    env:
+      # 是否配置了签名 Secrets（控制签名校验步骤与 Release 说明文案）
+      SIGNED: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -34,9 +37,26 @@ jobs:
       - name: 安装前端依赖
         run: npm ci
 
-      # beforeBuildCommand 会先跑 npm run build（tsc 严格检查），前端类型错误即失败
+      # beforeBuildCommand 会先跑 npm run build（tsc 严格检查），前端类型错误即失败。
+      # 配置了 APPLE_* Secrets 时，tauri-bundler 自动：导入证书到临时钥匙串 → Developer ID 签名
+      # （含 hardened runtime）→ notarytool 公证 → staple 订书；Secrets 缺省时保持未签名行为不变
       - name: 构建 Tauri 应用
         run: npm run tauri build
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: 校验签名与公证
+        if: env.SIGNED == 'true'
+        run: |
+          APP="src-tauri/target/release/bundle/macos/AI Trainer Prep.app"
+          codesign --verify --strict "$APP"
+          codesign -dv "$APP" 2>&1 | grep -E "Authority|TeamIdentifier" || true
+          spctl -a -t exec -vv "$APP"
 
       - name: 规范化安装包文件名（GitHub assets 不支持非 ASCII 名）
         run: |
@@ -62,8 +82,12 @@ jobs:
             cat commit-msg.txt
             echo
             echo "---"
-            echo "- macOS 首次打开：未做苹果签名/公证，浏览器下载后 Gatekeeper 会提示「已损坏」。App 拖入「应用程序」后终端执行一次："
-            echo "  \`xattr -cr \"/Applications/AI Trainer Prep.app\"\`（新版 macOS 上「右键 → 打开」已无效）"
+            if [ "$SIGNED" = "true" ]; then
+              echo "- macOS 包已签名并公证（Developer ID），下载后可直接打开；首次启动仍弹「已下载」提示时，右键 → 打开一次即可"
+            else
+              echo "- macOS 首次打开：未做苹果签名/公证，浏览器下载后 Gatekeeper 会提示「已损坏」。App 拖入「应用程序」后终端执行一次："
+              echo "  \`xattr -cr \"/Applications/AI Trainer Prep.app\"\`（新版 macOS 上「右键 → 打开」已无效）"
+            fi
             echo "- Windows 安装：未做代码签名，SmartScreen 弹出时点「更多信息 → 仍要运行」"
             echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"

@@ -30,3 +30,14 @@ UI 自动化测试需要真实浏览器驱动。两个约束：① 本机已装 
   `env.rs` 的行为只能人工验证。
 - ZCode IAB 插件损坏的 workaround（Edge `--headless --screenshot` 截图）只用于快速视觉检查，
   不作为回归门禁；E2E 才是门禁。
+
+## 修订（2026-10-10 · Edge 155 自动更新后无头停帧）
+
+Edge 自动升级 155 后，无头模式（含 about:blank）requestAnimationFrame 完全不触发——Playwright
+点击的元素稳定性判定依赖连续两帧 rAF，导致整套 E2E 全部点击超时；headed 模式经 playwright-core
+驱动同样停帧，反节流 flag、升级 playwright-core（1.64 已是最新）均无效，属 Edge 与 Playwright 的
+兼容性回归。
+
+**修订决策：测试脚本保留「系统 Edge 优先」，启动后先跑 2.5s rAF 探针；探针失败自动回落
+Playwright 内置 `chromium-headless-shell`**（`npx playwright install chromium-headless-shell`，
+一次性 ~100MB）。零配置初衷不变：正常机器仍走系统 Edge，Edge 再闹脾气时自动降级而不是全红。

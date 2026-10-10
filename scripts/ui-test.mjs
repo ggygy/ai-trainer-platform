@@ -9,7 +9,32 @@ const results = [];
 const jsErrors = [];
 
 async function run() {
-  const browser = await chromium.launch({ executablePath: EDGE, headless: true });
+// 先试系统 Edge；Edge 自动更新后无头模式可能整体停帧（rAF 不触发 → 点击判稳定永远超时），
+// 用 2.5s rAF 探针检测，失败回落 Playwright 内置 headless shell（ADR-0007 修订）
+async function launchBrowser() {
+  try {
+    const b = await chromium.launch({ executablePath: EDGE, headless: true });
+    const probe = await (await b.newContext()).newPage();
+    const ok = await probe.evaluate(
+      () =>
+        new Promise((res) => {
+          let n = 0;
+          const f = () => (++n >= 2 ? res(true) : requestAnimationFrame(f));
+          requestAnimationFrame(f);
+          setTimeout(() => res(false), 2500);
+        }),
+    );
+    await probe.close().catch(() => {});
+    if (ok) return b;
+    await b.close().catch(() => {});
+    console.log("⚠ 系统 Edge 无头模式 rAF 不触发（Edge 自动更新已知问题），回退内置 Chromium");
+  } catch {
+    /* 未装 Edge 或启动失败，直接用内置 */
+  }
+  return chromium.launch({ headless: true });
+}
+
+  const browser = await launchBrowser();
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
   page.on("pageerror", (e) => jsErrors.push("pageerror: " + e.message));
   page.on("console", (m) => m.type() === "error" && jsErrors.push("console: " + m.text().slice(0, 160)));

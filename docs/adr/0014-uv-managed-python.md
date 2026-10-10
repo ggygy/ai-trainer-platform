@@ -31,3 +31,17 @@
 - 实测（macOS，本机）：uv venv 3.13.11 + 13 依赖全装 + `python -m jupyter lab` 4.6.4 正常；
 - uv venv 无 pip 模块：检测页 pip 行按「uv」标记就绪，不再误报；
 - 代价：首次安装多下载 uv（~20MB）+ 托管 CPython（~30MB），可接受。
+
+## 修订（2026-10-10）：已装包枚举改走 importlib.metadata（stdin）
+
+uv 创建的 venv **不带 pip 模块**（包管理由 `uv pip` 承担），`python -m pip list` 在其中必然
+失败——依赖明明装好了，环境助手却永远显示「全部未安装」，用户反复点安装也「装不上」
+（Windows 实测：v0.3.0，11 项假性缺失）。
+
+改为向 `python -` 的 stdin 喂一小段 stdlib 脚本，用 `importlib.metadata.distributions()`
+枚举已装包（输出 `Name==Version` 行，解析逻辑不变）。任意解释器可用、不依赖 pip；走 stdin
+而非 `-c` 参数，Windows cmd 的引号规则完全无关（ADR-0011 修订）。jupyterlab 检测同样补上
+`python -m jupyter lab --version` 模块探测优先（venv/用户站点的 Scripts 不在 PATH）。
+
+同时 uv 各步骤（装 uv、装 Python、建 venv）的 run_streamed 失败不再被静默忽略，逐条写安装
+日志并注明「将回退系统 pip」。

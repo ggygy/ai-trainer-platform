@@ -7,11 +7,17 @@ use tauri::{AppHandle, Emitter, State};
 use super::env::python_exe_path;
 use super::{no_window, shell_command};
 
-pub struct JupyterState(pub Mutex<Option<Child>>);
+pub struct JupyterState {
+    child: Mutex<Option<Child>>,
+    /// 就绪地址（带 token）：stderr 捕获或看门狗兜底，status/已运行查询带回给前端。
+    /// 此前 status 永远返回空 url——页面切换重挂载后绿点还在、iframe 却永远停在
+    /// 「未启动」占位符（用户看到的「无法交互」即此）。
+    ready_url: Arc<Mutex<String>>,
+}
 
 impl Default for JupyterState {
     fn default() -> Self {
-        JupyterState(Mutex::new(None))
+        JupyterState { child: Mutex::new(None), ready_url: Arc::new(Mutex::new(String::new())) }
     }
 }
 
@@ -21,6 +27,11 @@ pub struct JupyterInfo {
     pub url: String,
     pub log: Vec<String>,
 }
+
+/// 允许被 Tauri WebView（异源）内嵌：jupyter 默认下发
+/// `Content-Security-Policy: frame-ancestors 'self'`，iframe 会被浏览器静默拦掉
+const FRAME_ARG: &str =
+    "--ServerApp.tornado_settings={\"headers\":{\"Content-Security-Policy\":\"frame-ancestors *\"}}";
 
 /// Jupyter 启动方式：PATH 上的 jupyter-lab 可执行文件，或 `python -m jupyter lab` 模块方式。
 /// mac 命令行工具 Python / Windows pip --user 装的包，其 scripts 目录（~/Library/Python/3.x/bin、
@@ -74,11 +85,20 @@ fn resolve_launch() -> Option<JupyterLaunch> {
 
 #[tauri::command]
 pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle) -> JupyterInfo {
-    let mut guard = state.0.lock().unwrap();
-    if let Some(child) = guard.as_mut() {
-        if matches!(child.try_wait(), Ok(None)) {
-            return JupyterInfo { running: true, url: String::new(), log: vec!["已在运行".into()] };
+    let already_running = {
+        let mut guard = state.child.lock().unwrap();
+        let running = match guard.as_mut() {
+            Some(child) => matches!(child.try_wait(), Ok(None)),
+            None => false,
+        };
+        if !running {
+            *guard = None;
         }
+        running
+    };
+    if already_running {
+        let url = state.ready_url.lock().unwrap().clone();
+        return JupyterInfo { running: true, url, log: vec!["已在运行".into()] };
     }
 
     let Some(launch) = resolve_launch() else {
@@ -99,12 +119,20 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
     let (mut command, desc) = match &launch {
         JupyterLaunch::Exe(jup) => {
             let mut c = Command::new(jup);
-            c.args(["--no-browser", &format!("--port={port}"), &format!("--notebook-dir={dir}")]);
+            c.args(["--no-browser", FRAME_ARG, &format!("--port={port}"), &format!("--notebook-dir={dir}")]);
             (c, format!("{jup} --port={port} --notebook-dir={dir}"))
         }
         JupyterLaunch::Module(py) => {
             let mut c = Command::new(py);
-            c.args(["-m", "jupyter", "lab", "--no-browser", &format!("--port={port}"), &format!("--notebook-dir={dir}")]);
+            c.args([
+                "-m",
+                "jupyter",
+                "lab",
+                "--no-browser",
+                FRAME_ARG,
+                &format!("--port={port}"),
+                &format!("--notebook-dir={dir}"),
+            ]);
             (c, format!("{py} -m jupyter lab --port={port} --notebook-dir={dir}"))
         }
     };
@@ -113,6 +141,7 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
     let Ok(mut child) = command.spawn() else {
         return JupyterInfo { running: false, url: String::new(), log: vec!["启动失败".into()] };
     };
+    *state.ready_url.lock().unwrap() = String::new();
 
     // stderr 环形缓冲：启动失败时把最后几行（含 traceback）透给前端，避免「启动中」卡死无信息
     let tail: Arc<std::sync::Mutex<std::collections::VecDeque<String>>> =
@@ -124,6 +153,7 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
     let app2 = app.clone();
     let tail2 = tail.clone();
     let ready2 = ready.clone();
+    let url2 = state.ready_url.clone();
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
@@ -141,6 +171,7 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
                     .find(|w| w.starts_with("http://") || w.starts_with("https://"))
                 {
                     ready2.store(true, std::sync::atomic::Ordering::Relaxed);
+                    *url2.lock().unwrap() = url.to_string();
                     let _ = app2.emit("jupyter-ready", serde_json::json!({ "url": url }));
                 }
             }
@@ -152,15 +183,15 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
     let app3 = app.clone();
     let tail3 = tail.clone();
     let ready3 = ready.clone();
+    let url3 = state.ready_url.clone();
     std::thread::spawn(move || {
         for _ in 0..30 {
             std::thread::sleep(std::time::Duration::from_millis(500));
             if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
                 if !ready3.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                    let _ = app3.emit(
-                        "jupyter-ready",
-                        serde_json::json!({ "url": format!("http://127.0.0.1:{port}/lab") }),
-                    );
+                    let fallback = format!("http://127.0.0.1:{port}/lab");
+                    *url3.lock().unwrap() = fallback.clone();
+                    let _ = app3.emit("jupyter-ready", serde_json::json!({ "url": fallback }));
                 }
                 return;
             }
@@ -171,13 +202,22 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
         }
     });
 
-    *guard = Some(child);
+    {
+        let mut guard = state.child.lock().unwrap();
+        *guard = Some(child);
+    }
     JupyterInfo { running: true, url: String::new(), log: vec![desc] }
 }
 
 #[tauri::command]
 pub fn jupyter_stop(state: State<'_, JupyterState>) {
-    if let Some(mut child) = state.0.lock().unwrap().take() {
+    shutdown(state.inner());
+}
+
+/// 杀掉运行中的 jupyter（Windows 连内核子进程树一起清）并清空就绪地址。
+/// 应用退出时也调用：不留占端口的僵尸实例。
+pub fn shutdown(state: &JupyterState) {
+    if let Some(mut child) = state.child.lock().unwrap().take() {
         #[cfg(target_os = "windows")]
         {
             // jupyter 会拉起 kernel 子进程，kill 只杀本体；taskkill /T 连进程树一起清
@@ -189,17 +229,25 @@ pub fn jupyter_stop(state: State<'_, JupyterState>) {
         let _ = child.kill();
         let _ = child.wait();
     }
+    state.ready_url.lock().unwrap().clear();
 }
 
 #[tauri::command]
 pub fn jupyter_status(state: State<'_, JupyterState>) -> JupyterInfo {
-    let mut guard = state.0.lock().unwrap();
-    let running = match guard.as_mut() {
-        Some(child) => matches!(child.try_wait(), Ok(None)),
-        None => false,
+    let running = {
+        let mut guard = state.child.lock().unwrap();
+        let running = match guard.as_mut() {
+            Some(child) => matches!(child.try_wait(), Ok(None)),
+            None => false,
+        };
+        if !running {
+            *guard = None;
+        }
+        running
     };
+    let mut url = state.ready_url.lock().unwrap();
     if !running {
-        *guard = None;
+        url.clear();
     }
-    JupyterInfo { running, url: String::new(), log: vec![] }
+    JupyterInfo { running, url: url.clone(), log: vec![] }
 }

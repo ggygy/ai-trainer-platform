@@ -208,7 +208,13 @@ fn ensure_uv_and_venv(app: &AppHandle) -> Option<String> {
             {
                 run_streamed(shell_command("curl -LsSf https://astral.sh/uv/install.sh | sh"), app);
             }
-            uv_path()?
+            match uv_path() {
+                Some(u) => u,
+                None => {
+                    emit("[错误] uv 安装未成功（网络或安全软件拦截），将回退系统 pip。也可手动安装 uv 后重试：https://docs.astral.sh/uv/");
+                    return None;
+                }
+            }
         }
     };
     emit(&format!("✓ uv 就绪：{uv}"));
@@ -219,14 +225,23 @@ fn ensure_uv_and_venv(app: &AppHandle) -> Option<String> {
         emit("正在安装 uv 托管的 Python 3.13（用户级，约 30MB，无需管理员）…");
         let mut c = Command::new(&uv);
         c.args(["python", "install", "3.13"]);
-        run_streamed(c, app);
+        if !run_streamed(c, app) {
+            emit("! Python 3.13 下载未成功（网络原因），仍尝试创建 venv…");
+        }
         emit(&format!("正在创建应用专属虚拟环境：{}", venv.display()));
         let mut c = Command::new(&uv);
         c.args(["venv"]).arg(&venv).args(["--python", "3.13"]);
-        run_streamed(c, app);
+        if !run_streamed(c, app) {
+            emit("! venv 创建命令未成功");
+        }
     }
     let s = vpy.to_string_lossy().to_string();
-    vpy.is_file().then_some(s)
+    if vpy.is_file() {
+        Some(s)
+    } else {
+        emit("[错误] 应用专属环境创建失败，将回退系统 pip");
+        None
+    }
 }
 
 /// 未找到 Python 时的平台化指引（写入安装日志）
@@ -437,6 +452,43 @@ fn sh_py(py: &[String], extra: &[&str]) -> Option<String> {
     None
 }
 
+/// 枚举已装包的脚本：经 stdin 喂给 `python -`。不用 `pip list`——uv 创建的 venv 没有 pip
+/// 模块，pip list 必然失败，装好的包会假性「全部未安装」；importlib.metadata 是 stdlib，
+/// 任何解释器都有。stdin 方式不经 argv/cmd 拼串，Windows 引号规则完全无关（ADR-0011 修订）。
+const LIST_DISTS_SCRIPT: &str = "\
+import importlib.metadata as m
+for d in m.distributions():
+    n = d.metadata.get('Name') or ''
+    if n and d.version:
+        print(n + '==' + d.version)
+";
+
+/// 用指定解释器枚举已装包，输出 freeze 风格行（Name==Version）
+fn python_dists(py: &[String]) -> String {
+    use std::io::Write;
+    let mut c = py_command(py, &["-"]);
+    c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    no_window(&mut c);
+    let Ok(mut child) = c.spawn() else {
+        return String::new();
+    };
+    let Some(mut stdin) = child.stdin.take() else {
+        return String::new();
+    };
+    // 脚本仅百余字节，管道缓冲足以一次写入，写完即关、不存在读写互等死锁
+    let fed = stdin.write_all(LIST_DISTS_SCRIPT.as_bytes()).is_ok();
+    drop(stdin);
+    if !fed {
+        let _ = child.kill();
+        let _ = child.wait();
+        return String::new();
+    }
+    match child.wait_with_output() {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        _ => String::new(),
+    }
+}
+
 #[tauri::command]
 pub fn detect_env() -> Vec<ToolInfo> {
     let mut result: Vec<ToolInfo> = Vec::new();
@@ -468,8 +520,8 @@ pub fn detect_env() -> Vec<ToolInfo> {
         detail: "包管理器".into(),
     });
 
-    // pip list 一次拿到全部已装包
-    let freeze = sh_py(&py, &["-m", "pip", "list", "--format=freeze"]).unwrap_or_default();
+    // 已装包枚举走 importlib.metadata（uv venv 无 pip 模块，pip list 会假性全缺）
+    let freeze = python_dists(&py);
     let mut installed: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for line in freeze.lines() {
         if let Some((n, v)) = line.split_once("==") {
@@ -477,7 +529,11 @@ pub fn detect_env() -> Vec<ToolInfo> {
         }
     }
 
-    let jl_ver = sh("jupyter lab --version || jupyter-lab --version").unwrap_or_default();
+    // jupyter 优先用当前解释器模块探测：venv/用户站点装的 jupyter 不一定在 PATH 上
+    let mut jl_ver = sh_py(&py, &["-m", "jupyter", "lab", "--version"]).unwrap_or_default();
+    if jl_ver.is_empty() {
+        jl_ver = sh("jupyter lab --version || jupyter-lab --version").unwrap_or_default();
+    }
     let jl_ok = !jl_ver.is_empty();
     result.push(ToolInfo {
         name: "jupyterlab".into(),

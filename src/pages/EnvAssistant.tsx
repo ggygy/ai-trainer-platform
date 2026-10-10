@@ -243,7 +243,11 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
                         setLogs((l) => [...l, "(mock) 浏览器预览模式：桌面应用中将打开独立 Lab 窗口"]);
                         return;
                       }
-                      window.open(jupyter.url || "http://127.0.0.1:8889/lab", "_blank");
+                      if (!jupyter.url) {
+                        setLogs((l) => [...l, "[错误] Jupyter 尚未就绪（地址未就绪），稍候再试"]);
+                        return;
+                      }
+                      window.open(jupyter.url, "_blank");
                     }}
                   >
                     <ExternalLink size={13} /> 打开 Lab

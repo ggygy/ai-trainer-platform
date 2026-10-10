@@ -18,6 +18,7 @@ import {
   installPython,
   jupyterStart,
   jupyterStop,
+  onJupyterFailed,
   onJupyterReady,
   isTauri,
   type ToolInfo,
@@ -35,6 +36,7 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
   const [jupyterDir, setJupyterDir] = useState(materialDir);
   const logRef = useRef<HTMLDivElement>(null);
   const unReadyRef = useRef<(() => void) | null>(null);
+  const unFailedRef = useRef<(() => void) | null>(null);
 
   const detect = async () => {
     setPhase("detecting");
@@ -51,6 +53,7 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
     detect();
     return () => {
       unReadyRef.current?.();
+      unFailedRef.current?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -95,7 +98,11 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
 
   const startJupyter = async () => {
     setMaterialDir(jupyterDir); // 落库后 PracticalExam 的 Jupyter 工作目录随之生效
-    setLogs((l) => [...l, `$ jupyter lab --no-browser --port=8889 --notebook-dir=${jupyterDir}`]);
+    setLogs((l) => [...l, `$ jupyter lab --no-browser（随机空闲端口）--notebook-dir=${jupyterDir}`]);
+    unFailedRef.current = await onJupyterFailed((lines) => {
+      setJupyter({ running: false, url: "" });
+      setLogs((l) => [...l, "[错误] Jupyter 启动失败（进程已退出），日志尾部：", ...lines.map((x) => "  " + x)]);
+    });
     try {
       const info = await jupyterStart(jupyterDir);
       unReadyRef.current = await onJupyterReady((url) => {
@@ -155,7 +162,7 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
         <StatCard
           label="Jupyter 服务"
           value={jupyter.running ? "运行中" : tools.find((t) => t.name.startsWith("jupyter"))?.version || "—"}
-          delta={jupyter.running ? "端口 8889 · 可在应用内打开" : tools.some((t) => t.name.startsWith("jupyter") && t.ok) ? "已安装 · 未启动" : "未安装"}
+          delta={jupyter.running ? "已就绪 · 可在应用内打开" : tools.some((t) => t.name.startsWith("jupyter") && t.ok) ? "已安装 · 未启动" : "未安装"}
           ok={jupyter.running}
         />
         <StatCard

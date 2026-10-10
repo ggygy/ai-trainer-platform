@@ -84,6 +84,12 @@ export async function onJupyterReady(cb: (url: string) => void): Promise<() => v
   return listen<{ url: string }>("jupyter-ready", (e) => cb(e.payload.url));
 }
 
+/** Jupyter 启动看门狗：超时端口未通 → 进程已崩，回调 stderr 尾部日志 */
+export async function onJupyterFailed(cb: (lines: string[]) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<{ lines: string[] }>("jupyter-failed", (e) => cb(e.payload.lines));
+}
+
 function mockEnv(): ToolInfo[] {
   return [
     { name: "python", ok: true, version: "3.11.8", detail: "系统运行时" },

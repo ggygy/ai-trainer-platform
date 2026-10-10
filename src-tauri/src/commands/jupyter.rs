@@ -1,7 +1,7 @@
 // Jupyter Notebook 进程管理：启动（解析 token URL）/ 停止 / 状态
 use serde::Serialize;
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
 use super::env::python_exe_path;
@@ -75,17 +75,22 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
     };
 
     std::fs::create_dir_all(&dir).ok();
+    // 随机空闲端口：上次异常退出留下的僵尸实例会一直占着 8889，固定端口会「启动中」卡死
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .map(|a| a.port())
+        .unwrap_or(8889);
     // 直接 spawn（不走 cmd /C 拼串），jupyter_stop 才能精确 kill 到这个进程
     let (mut command, desc) = match &launch {
         JupyterLaunch::Exe(jup) => {
             let mut c = Command::new(jup);
-            c.args(["--no-browser", "--port=8889", &format!("--notebook-dir={dir}")]);
-            (c, format!("{jup} --notebook-dir={dir}"))
+            c.args(["--no-browser", &format!("--port={port}"), &format!("--notebook-dir={dir}")]);
+            (c, format!("{jup} --port={port} --notebook-dir={dir}"))
         }
         JupyterLaunch::Module(py) => {
             let mut c = Command::new(py);
-            c.args(["-m", "jupyter", "lab", "--no-browser", "--port=8889", &format!("--notebook-dir={dir}")]);
-            (c, format!("{py} -m jupyter lab --notebook-dir={dir}"))
+            c.args(["-m", "jupyter", "lab", "--no-browser", &format!("--port={port}"), &format!("--notebook-dir={dir}")]);
+            (c, format!("{py} -m jupyter lab --port={port} --notebook-dir={dir}"))
         }
     };
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -94,18 +99,60 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
         return JupyterInfo { running: false, url: String::new(), log: vec!["启动失败".into()] };
     };
 
+    // stderr 环形缓冲：启动失败时把最后几行（含 traceback）透给前端，避免「启动中」卡死无信息
+    let tail: Arc<std::sync::Mutex<std::collections::VecDeque<String>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::VecDeque::with_capacity(8)));
+    let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
     // jupyter 的服务日志（含带 token 的 URL）走 stderr
     let stderr = child.stderr.take().expect("stderr");
     let app2 = app.clone();
+    let tail2 = tail.clone();
+    let ready2 = ready.clone();
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
             let _ = app2.emit("jupyter-log", serde_json::json!({ "line": line }));
-            if line.contains("http://127.0.0.1:8889") || line.contains("http://localhost:8889") {
-                if let Some(url) = line.split_whitespace().find(|w| w.starts_with("http")) {
+            {
+                let mut t = tail2.lock().unwrap();
+                if t.len() == 8 {
+                    t.pop_front();
+                }
+                t.push_back(line.clone());
+            }
+            if !ready2.load(std::sync::atomic::Ordering::Relaxed) {
+                if let Some(url) = line
+                    .split_whitespace()
+                    .find(|w| w.starts_with("http://") || w.starts_with("https://"))
+                {
+                    ready2.store(true, std::sync::atomic::Ordering::Relaxed);
                     let _ = app2.emit("jupyter-ready", serde_json::json!({ "url": url }));
                 }
             }
+        }
+    });
+
+    // 就绪看门狗：轮询端口 15s，端口通了但 stderr 的 URL 没抓到就用无 token 地址兜底；
+    // 超时未通 → 进程多半已崩（import 错误/启动即退），把 stderr 尾巴发给前端
+    let app3 = app.clone();
+    let tail3 = tail.clone();
+    let ready3 = ready.clone();
+    std::thread::spawn(move || {
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                if !ready3.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    let _ = app3.emit(
+                        "jupyter-ready",
+                        serde_json::json!({ "url": format!("http://127.0.0.1:{port}/lab") }),
+                    );
+                }
+                return;
+            }
+        }
+        if !ready3.load(std::sync::atomic::Ordering::Relaxed) {
+            let lines: Vec<String> = tail3.lock().unwrap().iter().cloned().collect();
+            let _ = app3.emit("jupyter-failed", serde_json::json!({ "lines": lines }));
         }
     });
 

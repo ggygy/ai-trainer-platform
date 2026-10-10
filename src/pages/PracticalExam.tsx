@@ -13,7 +13,7 @@ import { Card, CardHead, Badge, Btn, Ghost } from "../components/ui";
 import { QUESTION_GROUPS, taskSteps } from "../data/content";
 import { practicalRef } from "../lib/answers";
 import { useStore } from "../lib/store";
-import { jupyterStart, jupyterStop, onJupyterReady, jupyterStatus, isTauri, openFolder } from "../lib/api";
+import { jupyterStart, jupyterStop, onJupyterFailed, onJupyterReady, jupyterStatus, isTauri, openFolder } from "../lib/api";
 
 export default function PracticalExam({ initial }: { initial?: { groupId: string; idx: number } }) {
   const [sel, setSel] = useState(initial ?? { groupId: "2.2", idx: 0 });
@@ -25,6 +25,7 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   const [seconds, setSeconds] = useState(120 * 60);
   const [log, setLog] = useState<string[]>([]);
   const unReady = useRef<(() => void) | null>(null);
+  const unFailed = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setSeconds((s) => Math.max(0, s - 1)), 1000);
@@ -37,9 +38,11 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
       const st = await jupyterStatus();
       setJp({ running: st.running, url: st.url });
       unReady.current = await onJupyterReady((url) => setJp({ running: true, url }));
+      unFailed.current = await onJupyterFailed(onStartFailed);
     })();
     return () => {
       unReady.current?.();
+      unFailed.current?.();
     };
   }, []);
 
@@ -61,6 +64,13 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   const materialDir = useStore((s) => s.materialDir);
   const markPracticeDone = useStore((s) => s.markPracticeDone);
 
+  // 启动失败：后端看门狗 15s 内端口未通即判崩，回传 stderr 尾部
+  const onStartFailed = (lines: string[]) => {
+    setStarting(false);
+    setJp({ running: false, url: "" });
+    setLog((l) => [...l, "[错误] Jupyter 启动失败（进程已退出），日志尾部：", ...lines.map((x) => "  " + x)]);
+  };
+
   const startJupyter = async () => {
     setStarting(true);
     const dir = `${materialDir}/${dirOf(group)}`;
@@ -68,6 +78,7 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
       const info = await jupyterStart(dir);
       if (info.running && info.url) setJp({ running: true, url: info.url });
       unReady.current = await onJupyterReady((url) => setJp({ running: true, url }));
+      unFailed.current = await onJupyterFailed(onStartFailed);
       setLog((l) => [...l, `$ jupyter lab --notebook-dir ${dir}`, info.url ? `✓ 就绪: ${info.url}` : "✓ 启动中…"]);
     } catch (e) {
       setLog((l) => [...l, `[错误] ${String(e)}`]);

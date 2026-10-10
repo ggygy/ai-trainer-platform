@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  actions: write # 触发 build.yml workflow_dispatch 需要
 
 concurrency:
   group: release-${{ github.ref }}
@@ -47,15 +48,22 @@ jobs:
           git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
           git commit -m "chore(release): v$VERSION"
           git tag "v$VERSION"
+          pushed=0
           for i in 1 2 3 4 5; do
-            out=$(git push origin HEAD:main "v$VERSION" 2>&1)
-            echo "$out" | grep -q "main -> main" && { echo "pushed"; break; } || { echo "retry $i"; sleep 8; }
+            if out=$(git push origin HEAD:main "v$VERSION" 2>&1); then
+              echo "$out"; pushed=1; break
+            fi
+            echo "retry $i: $out"; sleep 8
           done
+          [ "$pushed" = "1" ] || { echo "::error::git push 连续 5 次失败"; exit 1; }
 
       - name: 触发「构建发布」（正式 Release，--latest 非预发布）
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ok=0
           for i in 1 2 3 4 5; do
-            gh workflow run build.yml --ref main -f release_tag="v$VERSION" && { echo "已触发"; break; } || { echo "retry $i"; sleep 8; }
+            if gh workflow run build.yml --ref main -f release_tag="v$VERSION"; then ok=1; echo "已触发构建"; break; fi
+            echo "retry $i"; sleep 8
           done
+          [ "$ok" = "1" ] || { echo "::error::触发 build.yml 连续 5 次失败"; exit 1; }

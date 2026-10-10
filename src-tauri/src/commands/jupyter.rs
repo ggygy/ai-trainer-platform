@@ -28,17 +28,30 @@ pub struct JupyterInfo {
     pub log: Vec<String>,
 }
 
-/// 允许被 Tauri WebView（异源）内嵌：jupyter 默认下发
-/// `Content-Security-Policy: frame-ancestors 'self'`，iframe 会被浏览器静默拦掉
-const FRAME_ARG: &str =
-    "--ServerApp.tornado_settings={\"headers\":{\"Content-Security-Policy\":\"frame-ancestors *\"}}";
-
 /// Jupyter 启动方式：PATH 上的 jupyter-lab 可执行文件，或 `python -m jupyter lab` 模块方式。
 /// mac 命令行工具 Python / Windows pip --user 装的包，其 scripts 目录（~/Library/Python/3.x/bin、
 /// %APPDATA%\Python\Python3x\Scripts）都不在 PATH——包明明装了却找不到命令，模块方式兜底。
-enum JupyterLaunch {
-    Exe(String),
-    Module(String), // 可直接 spawn 的 python 绝对路径
+struct JupyterLaunch {
+    /// 真正 spawn 的程序：jupyter-lab 可执行文件，或 python 绝对路径（module=true）
+    program: String,
+    module: bool,
+    /// jupyter lab 主版本（探测失败为 0）：>=4 时走自设 token（jupyter_server 2.x）
+    lab_major: u32,
+}
+
+/// 探测版本输出（"4.6.4"）的主版本号，失败返回 0
+fn probe_lab_major(mut c: Command) -> u32 {
+    no_window(&mut c);
+    c.output()
+        .ok()
+        .and_then(|o| {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if !o.status.success() || s.is_empty() {
+                return None;
+            }
+            s.split('.').next()?.parse().ok()
+        })
+        .unwrap_or(0)
 }
 
 fn resolve_launch() -> Option<JupyterLaunch> {
@@ -46,13 +59,9 @@ fn resolve_launch() -> Option<JupyterLaunch> {
     if let Some(py) = super::env::app_venv_python() {
         let mut probe = Command::new(&py);
         probe.args(["-m", "jupyter", "lab", "--version"]);
-        no_window(&mut probe);
-        let ok = probe
-            .output()
-            .map(|o| o.status.success() && !o.stdout.is_empty())
-            .unwrap_or(false);
-        if ok {
-            return Some(JupyterLaunch::Module(py));
+        let major = probe_lab_major(probe);
+        if major > 0 {
+            return Some(JupyterLaunch { program: py, module: true, lab_major: major });
         }
     }
     // ② PATH 上的 jupyter-lab
@@ -66,7 +75,10 @@ fn resolve_launch() -> Option<JupyterLaunch> {
         // Windows 的 where 可能返回多行，spawn 只认一个路径
         if let Some(p) = String::from_utf8_lossy(&out.stdout).lines().next().map(str::trim) {
             if !p.is_empty() {
-                return Some(JupyterLaunch::Exe(p.to_string()));
+                let mut probe = Command::new(p);
+                probe.arg("--version");
+                let major = probe_lab_major(probe);
+                return Some(JupyterLaunch { program: p.to_string(), module: false, lab_major: major });
             }
         }
     }
@@ -75,12 +87,35 @@ fn resolve_launch() -> Option<JupyterLaunch> {
     let py = python_exe_path()?;
     let mut probe = Command::new(&py);
     probe.args(["-m", "jupyter", "lab", "--version"]);
-    no_window(&mut probe);
-    let ok = probe
-        .output()
-        .map(|o| o.status.success() && !o.stdout.is_empty())
-        .unwrap_or(false);
-    ok.then_some(JupyterLaunch::Module(py))
+    let major = probe_lab_major(probe);
+    if major > 0 {
+        Some(JupyterLaunch { program: py, module: true, lab_major: major })
+    } else {
+        None
+    }
+}
+
+/// 允许被 Tauri WebView（异源）内嵌所需的两类参数：
+/// ① CSP frame-ancestors：jupyter 4.x 默认 'self'，iframe 会被浏览器静默拦截；
+/// ② SameSite=None(+Secure)：跨站 iframe 里 Lax cookie 一律不收不发——实测 Chromium 下
+///    连 `?token=` 自动登录都会被拦（会话 cookie 种不上，永远弹登录墙）。
+/// 注意值必须是 **Python 字面量**（True 大写）：traitlets 用 literal_eval 解析 dict 参数，
+/// JSON 的 `true` 会报 "expected a dict, not the list"。
+fn embed_args(lab_major: u32) -> Vec<String> {
+    let settings = if lab_major >= 4 {
+        "{'headers':{'Content-Security-Policy':'frame-ancestors *'},'cookie_options':{'samesite':'None','secure':True},'xsrf_cookie_kwargs':{'samesite':'None','secure':True}}"
+    } else {
+        "{'headers':{'Content-Security-Policy':'frame-ancestors *'}}"
+    };
+    vec![format!("--ServerApp.tornado_settings={settings}")]
+}
+
+/// 无外部依赖的随机 token（RandomState 每实例由系统熵播种）
+fn random_token() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let a = std::collections::hash_map::RandomState::new().build_hasher().finish();
+    let b = std::collections::hash_map::RandomState::new().build_hasher().finish();
+    format!("{a:016x}{b:016x}")
 }
 
 #[tauri::command]
@@ -115,26 +150,27 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
         .and_then(|l| l.local_addr())
         .map(|a| a.port())
         .unwrap_or(8889);
+    // jupyter_server 2.x（jupyterlab 4+）用自设 token：不依赖 stderr 抓包，地址完全确定；
+    // 旧版 jupyter 无此参数（未知参数会启动即退），走 stderr 抓带 token 的 URL
+    let token = random_token();
+    let known_url = (launch.lab_major >= 4)
+        .then(|| format!("http://127.0.0.1:{port}/lab?token={token}"));
+    let mut args: Vec<String> = vec!["--no-browser".into()];
+    args.extend(embed_args(launch.lab_major));
+    if launch.lab_major >= 4 {
+        args.push(format!("--IdentityProvider.token={token}"));
+    }
+    args.push(format!("--port={port}"));
+    args.push(format!("--notebook-dir={dir}"));
     // 直接 spawn（不走 cmd /C 拼串），jupyter_stop 才能精确 kill 到这个进程
-    let (mut command, desc) = match &launch {
-        JupyterLaunch::Exe(jup) => {
-            let mut c = Command::new(jup);
-            c.args(["--no-browser", FRAME_ARG, &format!("--port={port}"), &format!("--notebook-dir={dir}")]);
-            (c, format!("{jup} --port={port} --notebook-dir={dir}"))
-        }
-        JupyterLaunch::Module(py) => {
-            let mut c = Command::new(py);
-            c.args([
-                "-m",
-                "jupyter",
-                "lab",
-                "--no-browser",
-                FRAME_ARG,
-                &format!("--port={port}"),
-                &format!("--notebook-dir={dir}"),
-            ]);
-            (c, format!("{py} -m jupyter lab --port={port} --notebook-dir={dir}"))
-        }
+    let (mut command, desc) = if launch.module {
+        let mut c = Command::new(&launch.program);
+        c.arg("-m").args(["jupyter", "lab"]).args(&args);
+        (c, format!("{} -m jupyter lab --port={port} --notebook-dir={dir}", launch.program))
+    } else {
+        let mut c = Command::new(&launch.program);
+        c.args(&args);
+        (c, format!("{} --port={port} --notebook-dir={dir}", launch.program))
     };
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     no_window(&mut command);
@@ -178,27 +214,47 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
         }
     });
 
-    // 就绪看门狗：轮询端口 15s，端口通了但 stderr 的 URL 没抓到就用无 token 地址兜底；
-    // 超时未通 → 进程多半已崩（import 错误/启动即退），把 stderr 尾巴发给前端
+    // 就绪看门狗：轮询端口最多 20s（冷启动慢的机器也够）。
+    // 端口通了 → 自设 token 的直接发确定地址；旧版 jupyter 再给 stderr 4s 抓带 token 的
+    // URL，超时才用无 token 地址兜底（会停在登录页，但至少可手动粘 token）；
+    // 端口一直不通 → 进程多半已崩（import 错误/启动即退），把 stderr 尾巴发给前端
     let app3 = app.clone();
     let tail3 = tail.clone();
     let ready3 = ready.clone();
     let url3 = state.ready_url.clone();
     std::thread::spawn(move || {
-        for _ in 0..30 {
+        let mut up = false;
+        for _ in 0..40 {
             std::thread::sleep(std::time::Duration::from_millis(500));
             if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
-                if !ready3.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                    let fallback = format!("http://127.0.0.1:{port}/lab");
-                    *url3.lock().unwrap() = fallback.clone();
-                    let _ = app3.emit("jupyter-ready", serde_json::json!({ "url": fallback }));
-                }
-                return;
+                up = true;
+                break;
             }
         }
-        if !ready3.load(std::sync::atomic::Ordering::Relaxed) {
-            let lines: Vec<String> = tail3.lock().unwrap().iter().cloned().collect();
-            let _ = app3.emit("jupyter-failed", serde_json::json!({ "lines": lines }));
+        if !up {
+            if !ready3.load(std::sync::atomic::Ordering::Relaxed) {
+                let lines: Vec<String> = tail3.lock().unwrap().iter().cloned().collect();
+                let _ = app3.emit("jupyter-failed", serde_json::json!({ "lines": lines }));
+            }
+            return;
+        }
+        if let Some(u) = known_url {
+            if !ready3.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                *url3.lock().unwrap() = u.clone();
+                let _ = app3.emit("jupyter-ready", serde_json::json!({ "url": u }));
+            }
+            return;
+        }
+        for _ in 0..20 {
+            if ready3.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        if !ready3.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            let fallback = format!("http://127.0.0.1:{port}/lab");
+            *url3.lock().unwrap() = fallback.clone();
+            let _ = app3.emit("jupyter-ready", serde_json::json!({ "url": fallback }));
         }
     });
 

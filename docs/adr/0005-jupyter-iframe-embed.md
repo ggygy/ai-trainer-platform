@@ -39,3 +39,20 @@ WebView 是异源（tauri.localhost / tauri://localhost），iframe 被浏览器
 另修「运行中但 iframe 停在未启动占位符」：jupyter_status 此前永远返回空 url，页面切换重挂载
 后前端拿不到地址。JupyterState 增设常驻 ready_url（stderr 捕获或看门狗兜底时写入），status /
 已运行查询一律带回。应用退出（RunEvent::Exit）顺带 taskkill 整棵 jupyter 进程树，不再留僵尸。
+
+### 再修订（同日续）：SameSite=None + 自设 token（真实浏览器实测）
+
+仅放开 frame-ancestors 不够。Edge(Chromium 155) 实测：跨站 iframe 里 jupyter 的会话 cookie
+（默认无 SameSite → 按 Lax 处理）**一律种不上也带不出**——连 `?token=xxx` 的自动登录都会被
+拦下，iframe 永远停在登录墙（用户 v0.3.1 实拍即此）。jupyter_server 的 cookie 参数可经
+tornado settings 注入（`auth/login.py` 读 `settings["cookie_options"]`，`_xsrf` 走 tornado 的
+`xsrf_cookie_kwargs`）：注入 `{'samesite':'None','secure':True}` 后实测 token 直登、Lab 界面
+完整挂载、零 4xx/5xx。
+
+两个坑记下：
+- traitlets 解析 dict 型 CLI 参数走 **Python 字面量**（literal_eval），JSON 的 `true`/`false`
+  会报 `expected a dict, not the list`——值必须写 `True`；
+- jupyter_server ≥2（jupyterlab 4+）支持 `--IdentityProvider.token=<自设随机值>`，地址完全
+  确定（`/lab?token=…`），不再赌 stderr 抓包时序（端口先通、URL 后打会抢出无 token 兜底地
+  址）。旧版 jupyter 不识别该参数（启动即退），仅 jupyterlab ≥4 传；旧版看门狗改为「端口通
+  后再等 stderr 4s」才落无 token 兜底。

@@ -165,6 +165,34 @@ pub fn install_python(app: AppHandle) {
     });
 }
 
+/// 解析可直接 spawn 的 python 绝对路径（jupyter 模块方式启动用）：
+/// PATH 候选经 shell `command -v/where` 解析成绝对路径，Windows 再叠加常见目录回落。
+/// GUI 应用拿到绝对路径后可直接 spawn，不必再依赖进程 PATH。
+pub(crate) fn python_exe_path() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    let cands: &[&str] = &["python", "py"];
+    #[cfg(not(target_os = "windows"))]
+    let cands: &[&str] = &["python3"];
+    for c in cands {
+        #[cfg(target_os = "windows")]
+        let cmd = format!("where {c}");
+        #[cfg(not(target_os = "windows"))]
+        let cmd = format!("command -v {c}");
+        if let Some(out) = sh(&cmd) {
+            if let Some(p) = out.lines().next().map(str::trim) {
+                if !p.is_empty() {
+                    return Some(p.to_string());
+                }
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    if let Some((py, _)) = windows_python_fallback() {
+        return Some(py[0].clone());
+    }
+    None
+}
+
 fn install_python_impl(app: &AppHandle) -> bool {
     #[cfg(target_os = "windows")]
     {

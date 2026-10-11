@@ -1,5 +1,6 @@
 pub mod env;
 pub mod jupyter;
+pub mod materials;
 
 use std::process::Command;
 

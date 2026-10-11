@@ -16,6 +16,7 @@ import { QUESTION_GROUPS, taskSteps } from "../data/content";
 import { practicalRef } from "../lib/answers";
 import { useStore } from "../lib/store";
 import { open as pickDirectory } from "@tauri-apps/plugin-dialog";
+import { pickAndImportMaterials } from "../lib/materials";
 import { jupyterStart, jupyterStop, onJupyterFailed, onJupyterLog, onJupyterReady, jupyterStatus, isTauri, openFolder, pathIsDir, dirEntryCount } from "../lib/api";
 
 export default function PracticalExam({ initial }: { initial?: { groupId: string; idx: number } }) {
@@ -27,6 +28,7 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   const [starting, setStarting] = useState(false);
   const [full, setFull] = useState(false); // Notebook 区域铺满整个窗口
   const [folder, setFolder] = useState<string | null>(null); // 当前题实际存在的素材文件夹（null=落根目录）
+  const [importing, setImporting] = useState(false);
   const folderRef = useRef<string | null>(null);
   folderRef.current = folder;
   const [seconds, setSeconds] = useState(120 * 60);
@@ -85,6 +87,17 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   const materialDir = useStore((s) => s.materialDir);
   const setMaterialDir = useStore((s) => s.setMaterialDir);
   const markPracticeDone = useStore((s) => s.markPracticeDone);
+
+  // 导入素材包（网盘下载的 zip）；成功后 materialDir 更新 → 解析 effect 自动重跑
+  const runImport = async () => {
+    setImporting(true);
+    try {
+      const r = await pickAndImportMaterials();
+      if (r) setLog((l) => [...l, r.ok ? `✓ ${r.message} → ${r.dir}` : `[错误] ${r.message}`]);
+    } finally {
+      setImporting(false);
+    }
+  };
 
   // 更换素材总目录（素材包解压到别处时在此直接指认，不用绕环境助手）
   const changeMaterialDir = async () => {
@@ -264,6 +277,14 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
                   <ExternalLink size={14} />
                 </button>
               </div>
+              {folder === null && (
+                <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-warn-soft">
+                  <span className="flex-1 text-[10px] text-ink2 leading-relaxed">素材目录里没有本题素材。若尚未导入素材包，先导入 zip：</span>
+                  <Btn onClick={runImport} disabled={importing}>
+                    {importing ? "导入中…" : "导入素材包"}
+                  </Btn>
+                </div>
+              )}
               <div className="text-[10px] text-ink3 leading-relaxed">
                 运行依赖：pandas · scikit-learn · matplotlib · joblib（环境助手可一键安装）。点击「启动 Jupyter」将在素材目录启动 Notebook。
               </div>

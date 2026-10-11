@@ -21,8 +21,11 @@ import {
   onJupyterFailed,
   onJupyterReady,
   isTauri,
+  openFolder,
+  pathIsDir,
   type ToolInfo,
 } from "../lib/api";
+import { pickAndImportMaterials } from "../lib/materials";
 
 type Phase = "idle" | "detecting" | "installing";
 
@@ -34,6 +37,8 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
   const materialDir = useStore((s) => s.materialDir);
   const setMaterialDir = useStore((s) => s.setMaterialDir);
   const [jupyterDir, setJupyterDir] = useState(materialDir);
+  const [importing, setImporting] = useState(false);
+  const [materialsReady, setMaterialsReady] = useState<boolean | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const unReadyRef = useRef<(() => void) | null>(null);
   const unFailedRef = useRef<(() => void) | null>(null);
@@ -61,6 +66,28 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [logs]);
+
+  useEffect(() => {
+    let alive = true;
+    pathIsDir(`${materialDir}/1.1.1`).then((ok) => alive && setMaterialsReady(ok));
+    return () => {
+      alive = false;
+    };
+  }, [materialDir]);
+
+  // 导入素材包 zip（百度网盘下载后在此指认）
+  const runImport = async () => {
+    setImporting(true);
+    try {
+      const r = await pickAndImportMaterials();
+      if (r) {
+        setLogs((l) => [...l, r.ok ? `✓ ${r.message} → ${r.dir}` : `[错误] ${r.message}`]);
+        if (r.ok) setMaterialsReady(true);
+      }
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const missing = tools.filter((t) => !t.ok && !["python", "pip"].includes(t.name));
   const coreInstalled = tools.filter((t) => t.ok && !["python", "pip"].includes(t.name)).length;
@@ -226,6 +253,24 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
         </Card>
 
         <div className="w-[360px] shrink-0 flex flex-col gap-3.5">
+          <Card>
+            <CardHead
+              title="实操素材包"
+              right={materialsReady === null ? <Badge tone="muted">检测中</Badge> : materialsReady ? <Badge>已就绪</Badge> : <Badge tone="warn">未导入</Badge>}
+            />
+            <div className="text-[11px] text-ink3 mb-2.5 break-all leading-relaxed">
+              {materialsReady ? "40 题考卷与数据已就绪。" : "素材包（约 220MB）不含在安装包内：从网盘下载 zip 后在此导入。"}
+            </div>
+            <div className="flex gap-2">
+              <Btn primary className="!justify-center flex-1" onClick={runImport} disabled={importing}>
+                {importing ? "导入中（约十几秒）…" : "导入素材包（.zip）"}
+              </Btn>
+              <Btn onClick={() => openFolder(materialDir)} title="打开素材目录">
+                <FolderOpen size={14} />
+              </Btn>
+            </div>
+          </Card>
+
           <Card>
             <CardHead
               title="Jupyter 服务"

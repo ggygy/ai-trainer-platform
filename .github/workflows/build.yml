@@ -193,6 +193,7 @@ jobs:
             fi
             echo "- Windows 安装：未做代码签名，SmartScreen 弹出时点「更多信息 → 仍要运行」"
             echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
+            echo "- 实操题素材包（约 220MB）不含在安装包内：从网盘下载 zip 后在「环境助手 → 实操素材包」导入"
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
           } > release-notes.md
           if [ -n "$RELEASE_TAG" ]; then

@@ -55,6 +55,7 @@ export const useStore = create<Store & Actions>()(
       materialDir: navigator.userAgent.includes("Windows")
         ? "C:/Users/Public/Documents/人工智能训练师三级上网素材"
         : "/Users/zhouwangjun/Desktop/codeing/AI/人工智能训练师三级上网素材",
+      materialDirCustom: false,
 
       update: (patch) => set(patch),
 
@@ -104,7 +105,7 @@ export const useStore = create<Store & Actions>()(
       markPracticeDone: (key) =>
         set((s) => ({ practice: { ...s.practice, [key]: { done: true, lastAt: today() } } })),
 
-      setMaterialDir: (dir) => set({ materialDir: dir }),
+      setMaterialDir: (dir) => set({ materialDir: dir, materialDirCustom: true }),
     }),
     {
       name: "atp.store.v1",

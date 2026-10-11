@@ -1,5 +1,6 @@
 // Tauri 命令封装 + 事件监听；浏览器 dev 环境自动降级为 mock
 import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
+export { invoke };
 import { listen } from "@tauri-apps/api/event";
 
 export const isTauri = () => "__TAURI_INTERNALS__" in window;
@@ -134,4 +135,5 @@ export type Store = {
   theoryDone: Record<string, string>; // 已作答理论题 {"s5":"2026-10-09"}（key=j/s/m+题号，官方卷不计入）
   mastered: Record<string, boolean>; // 知识点掌握标记 {"k2-2":true}
   materialDir: string;
+  materialDirCustom: boolean; // 用户显式指认过素材目录（启动默认迁移不再覆盖）
 };

@@ -7,7 +7,9 @@ import PracticalTrain from "./pages/PracticalTrain";
 import PracticalExam from "./pages/PracticalExam";
 import EnvAssistant from "./pages/EnvAssistant";
 import Report from "./pages/Report";
-import { detectEnv, type ToolInfo } from "./lib/api";
+import { detectEnv, isTauri, pathIsDir, type ToolInfo } from "./lib/api";
+import { materialDir as appMaterialDir } from "./lib/materials";
+import { useStore } from "./lib/store";
 
 const PAGE_IDS: PageId[] = ["home", "learn", "exam", "practical", "practical-exam", "env", "report"];
 
@@ -35,6 +37,19 @@ export default function App() {
   };
   useEffect(() => {
     refreshEnv();
+    // 素材目录默认迁移：老用户的默认目录里没有真实素材（旧版只建过空壳），
+    // 未显式指认过目录时自动切到应用素材目录（导入素材包后的落点）
+    if (isTauri()) {
+      (async () => {
+        const st = useStore.getState();
+        if (st.materialDirCustom) return;
+        const md = await appMaterialDir();
+        if (!md) return;
+        if (!(await pathIsDir(`${st.materialDir}/1.1.1`))) {
+          useStore.getState().update({ materialDir: md });
+        }
+      })();
+    }
   }, []);
 
   const missing = tools ? tools.filter((t) => !t.ok && !["python", "pip"].includes(t.name)).length : 0;

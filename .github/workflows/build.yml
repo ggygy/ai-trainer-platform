@@ -73,10 +73,21 @@ jobs:
       - name: 校验签名与公证
         if: env.SIGNED == 'true'
         run: |
-          APP="src-tauri/target/release/bundle/macos/AI Trainer Prep.app"
-          codesign --verify --strict "$APP"
+          # tauri-bundler 打完 dmg 会删除 bundle/macos/ 下的 .app（日志 "Cleaning ..."），
+          # 所以只能挂载 dmg 校验里面的 app——这正是用户拿到手的真实状态
+          DMG=$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -1)
+          echo "== 校验 dmg 签名: $DMG"
+          codesign --verify --strict "$DMG"
+          MNT="$(mktemp -d)/dmg"
+          mkdir "$MNT"
+          hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG"
+          APP="$(find "$MNT" -maxdepth 1 -name '*.app' -print -quit)"
+          echo "== 校验 app: $APP"
+          codesign --verify --deep --strict "$APP"
           codesign -dv "$APP" 2>&1 | grep -E "Authority|TeamIdentifier" || true
           spctl -a -t exec -vv "$APP"
+          stapler validate "$APP"
+          hdiutil detach "$MNT"
 
       - name: 规范化安装包文件名（GitHub assets 不支持非 ASCII 名）
         run: |

@@ -144,7 +144,29 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
         return JupyterInfo { running: false, url: String::new(), log: vec!["未找到 jupyter".into()] };
     };
 
-    std::fs::create_dir_all(&dir).ok();
+    // 工作目录必须真实存在：对不存在的路径 create_dir_all 只会造出「空素材夹」，
+    // 用户在文件浏览器里看到的就是空目录（此前 dirOf 组合名不匹配即此症状）。
+    // 逐级上溯到第一个真实存在的祖先作为根；连祖先都没有（极端情况）才创建原目录。
+    let requested = std::path::PathBuf::from(&dir);
+    let mut root = requested.clone();
+    while !root.is_dir() {
+        match root.parent() {
+            Some(p) if !p.as_os_str().is_empty() => root = p.to_path_buf(),
+            _ => break,
+        }
+    }
+    let (dir, log_lines) = if root.is_dir() && root != requested {
+        (
+            root.to_string_lossy().to_string(),
+            vec![format!(
+                "[提示] 目录不存在，已改用真实存在的上级目录：{}",
+                root.display()
+            )],
+        )
+    } else {
+        std::fs::create_dir_all(&dir).ok();
+        (dir, Vec::new())
+    };
     // 随机空闲端口：上次异常退出留下的僵尸实例会一直占着 8889，固定端口会「启动中」卡死
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
@@ -262,7 +284,9 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
         let mut guard = state.child.lock().unwrap();
         *guard = Some(child);
     }
-    JupyterInfo { running: true, url: String::new(), log: vec![desc] }
+    let mut log = vec![desc];
+    log.extend(log_lines);
+    JupyterInfo { running: true, url: String::new(), log }
 }
 
 #[tauri::command]

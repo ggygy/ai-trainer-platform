@@ -36,8 +36,9 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
     (async () => {
       if (!isTauri()) return;
       const st = await jupyterStatus();
-      setJp({ running: st.running, url: st.url });
-      unReady.current = await onJupyterReady((url) => setJp({ running: true, url }));
+      // 恢复已运行的服务：直接落到当前题的素材文件夹
+      setJp({ running: st.running, url: st.running ? withTree(st.url, dirOf(sel)) : "" });
+      unReady.current = await onJupyterReady((url) => setJp({ running: true, url: withTree(url, dirOf(sel)) }));
       unFailed.current = await onJupyterFailed(onStartFailed);
     })();
     return () => {
@@ -73,18 +74,29 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
 
   const startJupyter = async () => {
     setStarting(true);
-    const dir = `${materialDir}/${dirOf(group)}`;
+    const dir = materialDir; // 服务根 = 素材总目录；具体题的文件夹由 withTree 落位
     try {
       const info = await jupyterStart(dir);
-      if (info.running && info.url) setJp({ running: true, url: info.url });
-      unReady.current = await onJupyterReady((url) => setJp({ running: true, url }));
+      if (info.running && info.url) setJp({ running: true, url: withTree(info.url, dirOf(sel)) });
+      unReady.current = await onJupyterReady((url) => setJp({ running: true, url: withTree(url, dirOf(sel)) }));
       unFailed.current = await onJupyterFailed(onStartFailed);
-      setLog((l) => [...l, `$ jupyter lab --notebook-dir ${dir}`, info.url ? `✓ 就绪: ${info.url}` : "✓ 启动中…"]);
+      setLog((l) => [
+        ...l,
+        `$ jupyter lab --notebook-dir ${dir}`,
+        ...info.log.filter((x) => x !== "已在运行"),
+        info.url ? `✓ 就绪: ${info.url}` : "✓ 启动中…",
+      ]);
     } catch (e) {
       setLog((l) => [...l, `[错误] ${String(e)}`]);
     }
     setStarting(false);
   };
+
+  // 切题跟随：把同一 Jupyter 服务的文件浏览器带到当前题的素材文件夹
+  useEffect(() => {
+    setJp((s) => (s.running && s.url ? { running: true, url: withTree(s.url, dirOf(sel)) } : s));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel.groupId, sel.idx]);
 
   const markDone = () => {
     markPracticeDone(qKey); // zustand 订阅：仪表盘/报告的进度立即刷新
@@ -186,8 +198,8 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-surface2">
                 <FileSpreadsheet size={15} className="text-accent shrink-0" />
-                <span className="flex-1 text-xs font-medium text-ink1 truncate">{dirOf(group)}/</span>
-                <button className="text-ink3 hover:text-accent" title="打开素材目录" onClick={() => openFolder(`${materialDir}/${dirOf(group)}`)}>
+                <span className="flex-1 text-xs font-medium text-ink1 truncate">{dirOf(sel)}/</span>
+                <button className="text-ink3 hover:text-accent" title="打开素材目录" onClick={() => openFolder(`${materialDir}/${dirOf(sel)}`)}>
                   <FolderOpen size={14} />
                 </button>
               </div>
@@ -278,11 +290,20 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   }
 }
 
-// 题组 → 素材目录映射（上网素材目录按题组文件夹组织）
-function dirOf(g: { id: string }): string {
-  if (g.id === "1.1" || g.id === "1.2") return "1.1.1-1.1.5~1.2.1-1.2.5素材";
-  if (g.id === "4.1" || g.id === "4.2") return "4.1.1-4.1.5~4.2.1-4.2.5素材";
-  return `${g.id}.1-${g.id}.5素材`;
+// 题组 → 素材文件夹：上网素材目录按题号平铺（1.1.1/、2.2.3/ …每题一个文件夹）
+function dirOf(sel: { groupId: string; idx: number }): string {
+  return `${sel.groupId}.${sel.idx + 1}`;
+}
+
+// 在 Jupyter 服务地址上定位到某题的素材文件夹（保留 token 等查询参数）
+function withTree(base: string, folder: string): string {
+  try {
+    const u = new URL(base);
+    u.pathname = `/lab/tree/${encodeURIComponent(folder)}`;
+    return u.toString();
+  } catch {
+    return base;
+  }
 }
 
 function fmt(s: number) {

@@ -8,6 +8,8 @@ import {
   ExternalLink,
   Square,
   FolderOpen,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { Card, CardHead, Badge, Btn, Ghost } from "../components/ui";
 import { QUESTION_GROUPS, taskSteps } from "../data/content";
@@ -22,6 +24,7 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   const [answer, setAnswer] = useState("");
   const [jp, setJp] = useState<{ running: boolean; url: string }>({ running: false, url: "" });
   const [starting, setStarting] = useState(false);
+  const [full, setFull] = useState(false); // Notebook 区域铺满整个窗口
   const [seconds, setSeconds] = useState(120 * 60);
   const [log, setLog] = useState<string[]>([]);
   const unReady = useRef<(() => void) | null>(null);
@@ -31,6 +34,16 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
     const t = setInterval(() => setSeconds((s) => Math.max(0, s - 1)), 1000);
     return () => clearInterval(t);
   }, []);
+
+  // 放大状态下 Esc 退出
+  useEffect(() => {
+    if (!full) return;
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFull(false);
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [full]);
 
   useEffect(() => {
     (async () => {
@@ -210,7 +223,9 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
           </Card>
         </div>
 
-        <Card className="flex-1 min-w-0 flex flex-col">
+        <Card
+          className={`${full ? "fixed inset-0 z-50" : "flex-1 min-w-0"} flex flex-col`}
+        >
           <CardHead
             title={
               <span className="flex items-center gap-2.5">
@@ -224,6 +239,10 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
                   <Ghost onClick={stopJp}>停止</Ghost>
                   <Btn onClick={() => window.open(jp.url, "_blank")}>
                     <ExternalLink size={13} /> 独立窗口打开
+                  </Btn>
+                  <Btn primary onClick={() => setFull((v) => !v)}>
+                    {full ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                    {full ? "还原" : "放大"}
                   </Btn>
                 </div>
               ) : (

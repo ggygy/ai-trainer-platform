@@ -17,6 +17,7 @@ import {
   installPackages,
   installPython,
   jupyterStart,
+  jupyterStatus,
   jupyterStop,
   onJupyterFailed,
   onJupyterReady,
@@ -155,6 +156,22 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
     setLogs((l) => [...l, "$ jupyter 已停止"]);
     unReadyRef.current?.();
   };
+
+  // 运行中每 5s 复核进程存活，崩溃后徽标回落而不是挂着假「运行中」
+  useEffect(() => {
+    if (!jupyter.running || !isTauri()) return;
+    const t = setInterval(async () => {
+      try {
+        if (!(await jupyterStatus()).running) {
+          setJupyter({ running: false, url: "" });
+          setLogs((l) => [...l, "✗ Jupyter 进程已退出，请重新启动"]);
+        }
+      } catch {
+        // 单次查询失败等下一轮
+      }
+    }, 5000);
+    return () => clearInterval(t);
+  }, [jupyter.running]);
 
   const pickDir = async () => {
     if (!isTauri()) return;

@@ -74,6 +74,24 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
     };
   }, []);
 
+  // 运行中每 5s 复核进程存活：服务崩溃/被结束后绿点回落、iframe 区回到日志提示，
+  // 避免「绿点 + localhost 拒绝连接」这类界面与真实状态脱节
+  useEffect(() => {
+    if (!jp.running || !isTauri()) return;
+    const t = setInterval(async () => {
+      try {
+        const st = await jupyterStatus();
+        if (!st.running) {
+          setJp({ running: false, url: "" });
+          setLog((l) => [...l.slice(-400), "✗ Jupyter 进程已退出（被手动结束或异常崩溃），请重新启动"]);
+        }
+      } catch {
+        // 单次状态查询失败不误报，等下一轮
+      }
+    }, 5000);
+    return () => clearInterval(t);
+  }, [jp.running]);
+
   // 响应题组页跳转
   useEffect(() => {
     const h = (e: Event) => {

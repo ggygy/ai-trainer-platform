@@ -195,6 +195,9 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
     if launch.lab_major >= 4 {
         args.push(format!("--IdentityProvider.token={token}"));
     }
+    // 绑死 IPv4 回环：默认 ip=localhost 时横幅自打 http://localhost:…，Windows 上
+    // WebView2 解析 ::1 而服务只听 127.0.0.1 时 iframe 直接「拒绝连接」
+    args.push("--ip=127.0.0.1".into());
     args.push(format!("--port={port}"));
     args.push(format!("--notebook-dir={dir}"));
     // 直接 spawn（不走 cmd /C 拼串），jupyter_stop 才能精确 kill 到这个进程
@@ -224,6 +227,7 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
     let tail: Arc<std::sync::Mutex<std::collections::VecDeque<String>>> =
         Arc::new(std::sync::Mutex::new(std::collections::VecDeque::with_capacity(8)));
     let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let adopt_stderr = launch.lab_major < 4;
 
     // jupyter 的服务日志（含带 token 的 URL）走 stderr
     let stderr = child.stderr.take().expect("stderr");
@@ -231,6 +235,7 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
     let tail2 = tail.clone();
     let ready2 = ready.clone();
     let url2 = state.ready_url.clone();
+    let adopt_stderr2 = adopt_stderr;
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
@@ -247,9 +252,16 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
                     .split_whitespace()
                     .find(|w| w.starts_with("http://") || w.starts_with("https://"))
                 {
+                    // lab≥4 用自设 token 的确定地址（看门狗端口通了就发），stderr 里的
+                    // 横幅 URL 只作日志不采纳；旧版 jupyter 才靠 stderr 抓带 token 的地址。
+                    // 横幅可能写 localhost，一律改写成 127.0.0.1 与确定地址保持一致
+                    if !adopt_stderr2 {
+                        continue;
+                    }
+                    let adopted = url.replacen("localhost", "127.0.0.1", 1);
                     ready2.store(true, std::sync::atomic::Ordering::Relaxed);
-                    *url2.lock().unwrap() = url.to_string();
-                    let _ = app2.emit("jupyter-ready", serde_json::json!({ "url": url }));
+                    *url2.lock().unwrap() = adopted.clone();
+                    let _ = app2.emit("jupyter-ready", serde_json::json!({ "url": adopted }));
                 }
             }
         }

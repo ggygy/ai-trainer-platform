@@ -12,7 +12,7 @@ import {
   Minimize2,
 } from "lucide-react";
 import { Card, CardHead, Badge, Btn, Ghost } from "../components/ui";
-import { QUESTION_GROUPS, taskSteps } from "../data/content";
+import { practicalTasks, QUESTION_GROUPS, taskSteps, type PracticalTask } from "../data/content";
 import { practicalRef } from "../lib/answers";
 import { useStore } from "../lib/store";
 import { open as pickDirectory } from "@tauri-apps/plugin-dialog";
@@ -128,7 +128,9 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
     };
   }, [sel.groupId, sel.idx, materialDir]);
 
-  const steps = taskSteps(group.id);
+  // 题目要求优先用官方任务书原文（40 题全覆盖），缺失时退回题组概括
+  const official: PracticalTask | undefined = practicalTasks[`${group.id}.${sel.idx + 1}`];
+  const steps = official?.requirements?.length ? official.requirements : taskSteps(group.id);
   const qKey = `${group.id}-${sel.idx}`;
   const refText = practicalRef.answers[`${group.id}.${sel.idx + 1}`] ?? "";
   const [showRef, setShowRef] = useState(() => new URLSearchParams(window.location.search).get("ref") === "1");
@@ -210,7 +212,17 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
       <div className="flex gap-3.5 flex-1 min-h-0">
         <div className="w-[400px] shrink-0 flex flex-col gap-3.5 overflow-y-auto">
           <Card>
-            <CardHead title="题目要求" right={<Badge tone="accent">{group.form === "填空" ? "填空 5 分" : `代码 ${group.score}`}</Badge>} />
+            <CardHead title="题目要求（官方原文）" right={<Badge tone="accent">{group.form === "填空" ? "填空 5 分" : `代码 ${group.score}`}</Badge>} />
+            {official && (
+              <div className="text-[10px] text-ink3 -mt-1">
+                官方考核时间 {official.minutes ?? "—"} 分钟{official.equipment ? ` · ${official.equipment}` : ""}
+              </div>
+            )}
+            {official?.background && (
+              <div className="text-[11px] leading-relaxed text-ink2 bg-surface2 rounded-lg p-2.5 max-h-24 overflow-y-auto selectable">
+                {official.background}
+              </div>
+            )}
             <div className="flex flex-col gap-2">
               {steps.map((s, i) => (
                 <div key={i} className="flex items-start gap-2.5">
@@ -221,6 +233,14 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
                 </div>
               ))}
             </div>
+            {(official?.skills.length ?? 0) + (official?.quality.length ?? 0) > 0 && (
+              <div className="mt-1 pt-2 border-t border-line">
+                <div className="text-[10px] font-semibold text-ink3 mb-1">评分要点（技能要求 / 质量指标）</div>
+                {[...(official?.skills ?? []), ...(official?.quality ?? [])].map((s2, i) => (
+                  <div key={i} className="text-[10px] text-ink3 leading-relaxed">· {s2}</div>
+                ))}
+              </div>
+            )}
           </Card>
 
           {group.form !== "填空" && (

@@ -225,6 +225,7 @@ export function taskSteps(groupId: string): string[] {
 }
 
 // 理论学习知识体系：直接采用官方《认定要素细目表》结构（5 大项 / 21 章节 / 300 细目点，带分值）
+import tasksRaw from "./practicalTasks.json";
 import syllabusRaw from "./syllabus.json";
 import lessonsRaw from "./lessons.json";
 import tagsRaw from "./questionTags.json";
@@ -337,3 +338,16 @@ export const KNOWLEDGE_TREE: KnowledgeNode[] = SYLLABUS.domains.flatMap((d) => [
   })),
 ]);
 
+
+// 官方考试平台每题任务书（试题名称/考核时间/场地设备/工作任务背景/逐条要求/技能与质量指标），
+// 解析自「人工智能训练师三级考试平台模拟界面」40 个题目页存档，脚本 scripts/parse-official-tasks.py
+export type PracticalTask = {
+  name: string;
+  minutes: number | null;
+  equipment: string;
+  background: string;
+  requirements: string[];
+  skills: string[];
+  quality: string[];
+};
+export const practicalTasks = tasksRaw as unknown as Record<string, PracticalTask>;

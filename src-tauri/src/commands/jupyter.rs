@@ -95,19 +95,32 @@ fn resolve_launch() -> Option<JupyterLaunch> {
     }
 }
 
-/// 允许被 Tauri WebView（异源）内嵌所需的两类参数：
+/// 允许被 Tauri WebView（异源）内嵌所需的三类参数：
 /// ① CSP frame-ancestors：jupyter 4.x 默认 'self'，iframe 会被浏览器静默拦截；
 /// ② SameSite=None(+Secure)：跨站 iframe 里 Lax cookie 一律不收不发——实测 Chromium 下
-///    连 `?token=` 自动登录都会被拦（会话 cookie 种不上，永远弹登录墙）。
-/// 注意值必须是 **Python 字面量**（True 大写）：traitlets 用 literal_eval 解析 dict 参数，
-/// JSON 的 `true` 会报 "expected a dict, not the list"。
+///    连 `?token=` 自动登录都会被拦（会话 cookie 种不上，永远弹登录墙）；
+/// ③ allow_origin='*'(+credentials)：内核通道走 WebSocket，跨站 iframe 的 WS 握手带
+///    Origin: tauri.localhost，默认仅同源 → 403，症状是文件浏览器正常、内核永远
+///    「Connecting」、cell 跑不了。
+/// 注意 tornado_settings 的值必须是 **Python 字面量**（True 大写）：traitlets 用
+/// literal_eval 解析 dict 参数，JSON 的 `true` 会报 "expected a dict, not the list"。
 fn embed_args(lab_major: u32) -> Vec<String> {
     let settings = if lab_major >= 4 {
         "{'headers':{'Content-Security-Policy':'frame-ancestors *'},'cookie_options':{'samesite':'None','secure':True},'xsrf_cookie_kwargs':{'samesite':'None','secure':True}}"
     } else {
         "{'headers':{'Content-Security-Policy':'frame-ancestors *'}}"
     };
-    vec![format!("--ServerApp.tornado_settings={settings}")]
+    let mut v = vec![
+        format!("--ServerApp.tornado_settings={settings}"),
+        // ServerApp trait，jupyter_server 1.x/2.x 都有，旧版也安全
+        "--ServerApp.allow_origin=*".into(),
+        "--ServerApp.allow_credentials=True".into(),
+    ];
+    if lab_major >= 4 {
+        // 关掉右下角 Jupyter 新闻弹窗（内嵌视图里没地方设置，很碍事）；LabApp trait，仅新版保证存在
+        v.push("--LabApp.news_disable=True".into());
+    }
+    v
 }
 
 /// 无外部依赖的随机 token（RandomState 每实例由系统熵播种）
@@ -195,6 +208,12 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
         (c, format!("{} --port={port} --notebook-dir={dir}", launch.program))
     };
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    // 内核连接文件默认写在 %APPDATA%/jupyter/runtime（位于 Windows 用户目录下）——
+    // 中文用户名时内核进程常因路径编码读不到连接文件，永远卡「starting」。
+    // 指到应用自己的 ASCII 目录（"AI Trainer Prep"，含空格但 jupyter 处理无误）
+    let runtime_dir = super::env::app_data_root().join("jupyter-runtime");
+    std::fs::create_dir_all(&runtime_dir).ok();
+    command.env("JUPYTER_RUNTIME_DIR", &runtime_dir);
     no_window(&mut command);
     let Ok(mut child) = command.spawn() else {
         return JupyterInfo { running: false, url: String::new(), log: vec!["启动失败".into()] };

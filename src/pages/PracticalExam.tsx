@@ -15,7 +15,7 @@ import { Card, CardHead, Badge, Btn, Ghost } from "../components/ui";
 import { QUESTION_GROUPS, taskSteps } from "../data/content";
 import { practicalRef } from "../lib/answers";
 import { useStore } from "../lib/store";
-import { jupyterStart, jupyterStop, onJupyterFailed, onJupyterReady, jupyterStatus, isTauri, openFolder } from "../lib/api";
+import { jupyterStart, jupyterStop, onJupyterFailed, onJupyterLog, onJupyterReady, jupyterStatus, isTauri, openFolder, pathIsDir } from "../lib/api";
 
 export default function PracticalExam({ initial }: { initial?: { groupId: string; idx: number } }) {
   const [sel, setSel] = useState(initial ?? { groupId: "2.2", idx: 0 });
@@ -25,10 +25,14 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   const [jp, setJp] = useState<{ running: boolean; url: string }>({ running: false, url: "" });
   const [starting, setStarting] = useState(false);
   const [full, setFull] = useState(false); // Notebook 区域铺满整个窗口
+  const [folder, setFolder] = useState<string | null>(null); // 当前题实际存在的素材文件夹（null=落根目录）
+  const folderRef = useRef<string | null>(null);
+  folderRef.current = folder;
   const [seconds, setSeconds] = useState(120 * 60);
   const [log, setLog] = useState<string[]>([]);
   const unReady = useRef<(() => void) | null>(null);
   const unFailed = useRef<(() => void) | null>(null);
+  const unLog = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setSeconds((s) => Math.max(0, s - 1)), 1000);
@@ -50,13 +54,20 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
       if (!isTauri()) return;
       const st = await jupyterStatus();
       // 恢复已运行的服务：直接落到当前题的素材文件夹
-      setJp({ running: st.running, url: st.running ? withTree(st.url, dirOf(sel)) : "" });
-      unReady.current = await onJupyterReady((url) => setJp({ running: true, url: withTree(url, dirOf(sel)) }));
+      setJp({ running: st.running, url: st.running ? withTree(st.url, folderRef.current) : "" });
+      unReady.current = await onJupyterReady((url) => setJp({ running: true, url: withTree(url, folderRef.current) }));
       unFailed.current = await onJupyterFailed(onStartFailed);
+      unLog.current = await onJupyterLog((line) => {
+        // 内核启动/崩溃的关键行透到日志区，其余服务心跳不刷屏
+        if (/kernel|error|traceback|failed|died/i.test(line)) {
+          setLog((l) => [...l.slice(-400), `[jupyter] ${line}`]);
+        }
+      });
     })();
     return () => {
       unReady.current?.();
       unFailed.current?.();
+      unLog.current?.();
     };
   }, []);
 
@@ -70,13 +81,30 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
     return () => window.removeEventListener("open-practical", h);
   }, []);
 
+  const materialDir = useStore((s) => s.materialDir);
+  const markPracticeDone = useStore((s) => s.markPracticeDone);
+
+  // 解析当前题真实存在的素材文件夹（两种布局兼容；都没有则落根目录并提示）
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      for (const c of folderCandidates(sel)) {
+        if (await pathIsDir(`${materialDir}/${c}`)) {
+          if (alive) setFolder(c);
+          return;
+        }
+      }
+      if (alive) setFolder(null);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [sel.groupId, sel.idx, materialDir]);
+
   const steps = taskSteps(group.id);
   const qKey = `${group.id}-${sel.idx}`;
   const refText = practicalRef.answers[`${group.id}.${sel.idx + 1}`] ?? "";
   const [showRef, setShowRef] = useState(() => new URLSearchParams(window.location.search).get("ref") === "1");
-
-  const materialDir = useStore((s) => s.materialDir);
-  const markPracticeDone = useStore((s) => s.markPracticeDone);
 
   // 启动失败：后端看门狗 15s 内端口未通即判崩，回传 stderr 尾部
   const onStartFailed = (lines: string[]) => {
@@ -90,13 +118,14 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
     const dir = materialDir; // 服务根 = 素材总目录；具体题的文件夹由 withTree 落位
     try {
       const info = await jupyterStart(dir);
-      if (info.running && info.url) setJp({ running: true, url: withTree(info.url, dirOf(sel)) });
-      unReady.current = await onJupyterReady((url) => setJp({ running: true, url: withTree(url, dirOf(sel)) }));
+      if (info.running && info.url) setJp({ running: true, url: withTree(info.url, folderRef.current) });
+      unReady.current = await onJupyterReady((url) => setJp({ running: true, url: withTree(url, folderRef.current) }));
       unFailed.current = await onJupyterFailed(onStartFailed);
       setLog((l) => [
         ...l,
         `$ jupyter lab --notebook-dir ${dir}`,
         ...info.log.filter((x) => x !== "已在运行"),
+        ...(folderRef.current ? [] : [`[提示] 素材包中没有「${folderCandidates(sel).join("」或「")}」文件夹，已在根目录打开；请从左侧文件浏览器进入题组文件夹查看参考代码`]),
         info.url ? `✓ 就绪: ${info.url}` : "✓ 启动中…",
       ]);
     } catch (e) {
@@ -107,7 +136,7 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
 
   // 切题跟随：把同一 Jupyter 服务的文件浏览器带到当前题的素材文件夹
   useEffect(() => {
-    setJp((s) => (s.running && s.url ? { running: true, url: withTree(s.url, dirOf(sel)) } : s));
+    setJp((s) => (s.running && s.url ? { running: true, url: withTree(s.url, folderRef.current) } : s));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel.groupId, sel.idx]);
 
@@ -211,8 +240,10 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-surface2">
                 <FileSpreadsheet size={15} className="text-accent shrink-0" />
-                <span className="flex-1 text-xs font-medium text-ink1 truncate">{dirOf(sel)}/</span>
-                <button className="text-ink3 hover:text-accent" title="打开素材目录" onClick={() => openFolder(`${materialDir}/${dirOf(sel)}`)}>
+                <span className="flex-1 text-xs font-medium text-ink1 truncate">
+                  {folder ?? `${folderCandidates(sel)[0]}（未找到，显示根目录）`}
+                </span>
+                <button className="text-ink3 hover:text-accent" title="打开素材目录" onClick={() => openFolder(folder ? `${materialDir}/${folder}` : materialDir)}>
                   <FolderOpen size={14} />
                 </button>
               </div>
@@ -271,10 +302,11 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
                 <div className="text-slate-400 select-none">// Jupyter 未启动 — 点击右上角「启动 Jupyter」在此目录打开 Notebook</div>
                 {log.length === 0 && (
                   <pre className="text-slate-500 select-none whitespace-pre-wrap">{`# 建议流程
-# 1. 阅读左侧「题目要求」
-# 2. 启动 Jupyter，打开素材中的 .ipynb
-# 3. 逐单元格运行并核对输出
-# 4. 完成后点击上方「标记完成」`}</pre>
+# 1. 阅读左侧「题目要求」，打开素材里的 .ipynb 考卷（挖空+分值标注）
+# 2. 补全挖空代码，Shift+Enter 逐格运行
+# 3. 怎样算成功：全部空格填完、运行无报错、
+#    结果与左侧「参考答案」一致（可展开对照）
+# 4. 点击上方「标记完成」记进度`}</pre>
                 )}
                 {log.map((l, i) => (
                   <div key={i} className={l.startsWith("$") ? "text-blue-300" : l.startsWith("✓") ? "text-emerald-300" : l.startsWith("[错误]") ? "text-red-300" : "text-slate-300"}>
@@ -309,13 +341,22 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   }
 }
 
-// 题组 → 素材文件夹：上网素材目录按题号平铺（1.1.1/、2.2.3/ …每题一个文件夹）
-function dirOf(sel: { groupId: string; idx: number }): string {
-  return `${sel.groupId}.${sel.idx + 1}`;
+// 题组 → 素材文件夹候选（按存在与否逐个尝试）：
+// ① 题号平铺（1.1.1/，每题一个文件夹）；② 题组组合文件夹（部分素材包按 1.1.1-1.1.5~… 组织，
+// 参考代码放里面）。都没有 → null，落到 Jupyter 根目录并在日志里说明去哪找参考文件
+function folderCandidates(sel: { groupId: string; idx: number }): string[] {
+  const grouped =
+    sel.groupId === "1.1" || sel.groupId === "1.2"
+      ? "1.1.1-1.1.5~1.2.1-1.2.5素材"
+      : sel.groupId === "4.1" || sel.groupId === "4.2"
+        ? "4.1.1-4.1.5~4.2.1-4.2.5素材"
+        : `${sel.groupId}.1-${sel.groupId}.5素材`;
+  return [`${sel.groupId}.${sel.idx + 1}`, grouped];
 }
 
-// 在 Jupyter 服务地址上定位到某题的素材文件夹（保留 token 等查询参数）
-function withTree(base: string, folder: string): string {
+// 在 Jupyter 服务地址上定位到某题的素材文件夹（保留 token 等查询参数）；folder=null 则停留根目录
+function withTree(base: string, folder: string | null): string {
+  if (!folder) return base;
   try {
     const u = new URL(base);
     u.pathname = `/lab/tree/${encodeURIComponent(folder)}`;

@@ -134,20 +134,26 @@ fn shell_prefix(py: &[String]) -> String {
 
 /// 应用专属 venv 位置：固定路径，检测与启动都直接指向它
 fn app_venv_dir() -> std::path::PathBuf {
+    app_data_root().join("venv")
+}
+
+/// 应用数据根目录（ASCII 路径）：%LOCALAPPDATA%\AI Trainer Prep 等，
+/// 供 venv 与 jupyter runtime 使用——避开 Windows 中文用户名目录的编码坑
+pub(crate) fn app_data_root() -> std::path::PathBuf {
     #[cfg(target_os = "windows")]
     {
         let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| std::env::var("USERPROFILE").unwrap_or_default());
-        std::path::PathBuf::from(base).join("AI Trainer Prep").join("venv")
+        std::path::PathBuf::from(base).join("AI Trainer Prep")
     }
     #[cfg(target_os = "macos")]
     {
         let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        std::path::PathBuf::from(base).join("Library/Application Support/AI Trainer Prep/venv")
+        std::path::PathBuf::from(base).join("Library/Application Support/AI Trainer Prep")
     }
     #[cfg(target_os = "linux")]
     {
         let base = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-        std::path::PathBuf::from(base).join(".local/share/ai-trainer-prep/venv")
+        std::path::PathBuf::from(base).join(".local/share/ai-trainer-prep")
     }
 }
 
@@ -645,4 +651,10 @@ pub fn open_folder(path: String) {
     let _ = Command::new("explorer").arg(&path).spawn();
     #[cfg(target_os = "linux")]
     let _ = Command::new("xdg-open").arg(&path).spawn();
+}
+
+/// 目录是否存在（前端判断素材文件夹布局用：题号平铺 / 题组组合文件夹 / 都没有则落根目录）
+#[tauri::command]
+pub fn path_is_dir(path: String) -> bool {
+    std::path::Path::new(&path).is_dir()
 }

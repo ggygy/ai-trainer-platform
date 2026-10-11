@@ -56,3 +56,17 @@ tornado settings 注入（`auth/login.py` 读 `settings["cookie_options"]`，`_x
   确定（`/lab?token=…`），不再赌 stderr 抓包时序（端口先通、URL 后打会抢出无 token 兜底地
   址）。旧版 jupyter 不识别该参数（启动即退），仅 jupyterlab ≥4 传；旧版看门狗改为「端口通
   后再等 stderr 4s」才落无 token 兜底。
+
+### 三修（用户实测内核 Connecting）：allow_origin + ASCII runtime 目录 + 内核日志可见
+
+用户真机（WebView2）：文件浏览器正常（HTTP+cookie 通），内核永远「Connecting」= 服务端
+内核进程没起来或 WS 被拒。三项处置：
+- `--ServerApp.allow_origin='*' --ServerApp.allow_credentials=True`：跨站 iframe 的 WS
+  握手 Origin 主机名（tauri.localhost）与服务端（127.0.0.1）不同；jupyter 的 origin 校验
+  只比主机名不比端口，主机名不同必拒。同站跨源实测：会话→WS→执行 2+2 取回 "4" 全链路通过。
+- `JUPYTER_RUNTIME_DIR` 指到应用数据目录（ASCII）：中文用户名 Windows 的经典坑——内核
+  连接文件写在 `C:\Users\<中文名>\AppData\...\jupyter\runtime`，内核进程读不到，永远
+  starting。实测连接文件正确落在指定目录。
+- `jupyter-log` 事件（服务端 stderr）按 kernel/error 关键词过滤透到两页日志区：内核再
+  出问题，界面上直接能看到 traceback。
+- 顺带 `--LabApp.news_disable=True` 关掉右下角新闻弹窗。

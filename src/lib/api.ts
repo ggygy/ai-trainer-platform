@@ -62,6 +62,11 @@ export async function openFolder(path: string): Promise<void> {
   await invoke("open_folder", { path });
 }
 
+export async function pathIsDir(path: string): Promise<boolean> {
+  if (!isTauri()) return false;
+  return invoke<boolean>("path_is_dir", { path });
+}
+
 export type JupyterInfo = { running: boolean; url: string; log: string[] };
 
 export async function jupyterStart(dir: string): Promise<JupyterInfo> {
@@ -82,6 +87,12 @@ export async function jupyterStatus(): Promise<JupyterInfo> {
 export async function onJupyterReady(cb: (url: string) => void): Promise<() => void> {
   if (!isTauri()) return () => {};
   return listen<{ url: string }>("jupyter-ready", (e) => cb(e.payload.url));
+}
+
+/** Jupyter 服务端日志（含内核启动失败原因），逐行推送 */
+export async function onJupyterLog(cb: (line: string) => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen<{ line: string }>("jupyter-log", (e) => cb(e.payload.line));
 }
 
 /** Jupyter 启动看门狗：超时端口未通 → 进程已崩，回调 stderr 尾部日志 */

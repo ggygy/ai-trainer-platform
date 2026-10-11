@@ -645,12 +645,37 @@ fn run_streamed(mut command: Command, app: &AppHandle) -> bool {
 
 #[tauri::command]
 pub fn open_folder(path: String) {
-    #[cfg(target_os = "macos")]
-    let _ = Command::new("open").arg(&path).spawn();
+    // 路径必须真实存在且用平台原生分隔符：explorer 对正斜杠路径经常不认、
+    // 静默回落打开「文档」目录（用户实测）。不存在时逐级上溯到最近的祖先。
+    let mut root = std::path::PathBuf::from(&path);
+    while !root.is_dir() {
+        match root.parent() {
+            Some(p) if !p.as_os_str().is_empty() => root = p.to_path_buf(),
+            _ => break,
+        }
+    }
+    if !root.is_dir() {
+        return;
+    }
     #[cfg(target_os = "windows")]
-    let _ = Command::new("explorer").arg(&path).spawn();
+    let native = root.to_string_lossy().replace('/', "\\");
+    #[cfg(not(target_os = "windows"))]
+    let native = root.to_string_lossy().to_string();
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("open").arg(&native).spawn();
+    #[cfg(target_os = "windows")]
+    let _ = Command::new("explorer").arg(&native).spawn();
     #[cfg(target_os = "linux")]
-    let _ = Command::new("xdg-open").arg(&path).spawn();
+    let _ = Command::new("xdg-open").arg(&native).spawn();
+}
+
+/// 目录内的条目数（非目录/不存在返回 0）：素材文件夹解析用「存在且有内容」判定，
+/// 避免选中旧版误建的空壳文件夹后 Jupyter 里什么都看不到
+#[tauri::command]
+pub fn dir_entry_count(path: String) -> u32 {
+    std::fs::read_dir(std::path::Path::new(&path))
+        .map(|it| it.filter_map(|e| e.ok()).count() as u32)
+        .unwrap_or(0)
 }
 
 /// 目录是否存在（前端判断素材文件夹布局用：题号平铺 / 题组组合文件夹 / 都没有则落根目录）

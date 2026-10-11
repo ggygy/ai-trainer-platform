@@ -15,6 +15,7 @@ pub fn run() {
             commands::env::install_python,
             commands::env::open_folder,
             commands::env::path_is_dir,
+            commands::env::dir_entry_count,
             commands::jupyter::jupyter_start,
             commands::jupyter::jupyter_stop,
             commands::jupyter::jupyter_status,

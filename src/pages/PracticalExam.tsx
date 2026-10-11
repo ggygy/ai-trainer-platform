@@ -15,7 +15,8 @@ import { Card, CardHead, Badge, Btn, Ghost } from "../components/ui";
 import { QUESTION_GROUPS, taskSteps } from "../data/content";
 import { practicalRef } from "../lib/answers";
 import { useStore } from "../lib/store";
-import { jupyterStart, jupyterStop, onJupyterFailed, onJupyterLog, onJupyterReady, jupyterStatus, isTauri, openFolder, pathIsDir } from "../lib/api";
+import { open as pickDirectory } from "@tauri-apps/plugin-dialog";
+import { jupyterStart, jupyterStop, onJupyterFailed, onJupyterLog, onJupyterReady, jupyterStatus, isTauri, openFolder, pathIsDir, dirEntryCount } from "../lib/api";
 
 export default function PracticalExam({ initial }: { initial?: { groupId: string; idx: number } }) {
   const [sel, setSel] = useState(initial ?? { groupId: "2.2", idx: 0 });
@@ -82,14 +83,27 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   }, []);
 
   const materialDir = useStore((s) => s.materialDir);
+  const setMaterialDir = useStore((s) => s.setMaterialDir);
   const markPracticeDone = useStore((s) => s.markPracticeDone);
 
-  // 解析当前题真实存在的素材文件夹（两种布局兼容；都没有则落根目录并提示）
+  // 更换素材总目录（素材包解压到别处时在此直接指认，不用绕环境助手）
+  const changeMaterialDir = async () => {
+    if (!isTauri()) return;
+    const dir = await pickDirectory({ directory: true, multiple: false, title: "选择实操素材总目录" });
+    if (typeof dir === "string" && dir) {
+      setMaterialDir(dir);
+      setLog((l) => [...l, `$ 素材目录已更换: ${dir}`]);
+    }
+  };
+
+  // 解析当前题真实存在且有内容的素材文件夹（两种布局兼容）。
+  // 只判「存在」不够：旧版误建的空壳文件夹存在但为空，选中它 Jupyter 里什么都看不到
   useEffect(() => {
     let alive = true;
     (async () => {
       for (const c of folderCandidates(sel)) {
-        if (await pathIsDir(`${materialDir}/${c}`)) {
+        const p = `${materialDir}/${c}`;
+        if ((await pathIsDir(p)) && (await dirEntryCount(p)) > 0) {
           if (alive) setFolder(c);
           return;
         }
@@ -125,7 +139,7 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
         ...l,
         `$ jupyter lab --notebook-dir ${dir}`,
         ...info.log.filter((x) => x !== "已在运行"),
-        ...(folderRef.current ? [] : [`[提示] 素材包中没有「${folderCandidates(sel).join("」或「")}」文件夹，已在根目录打开；请从左侧文件浏览器进入题组文件夹查看参考代码`]),
+        ...(folderRef.current ? [] : [`[提示] 素材目录里没有「${folderCandidates(sel).join("」或「")}」文件夹（或为空），已在根目录打开。若素材包解压在别处，点左侧「素材与环境」里的更换按钮重新指认`]),
         info.url ? `✓ 就绪: ${info.url}` : "✓ 启动中…",
       ]);
     } catch (e) {
@@ -241,10 +255,13 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
               <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-surface2">
                 <FileSpreadsheet size={15} className="text-accent shrink-0" />
                 <span className="flex-1 text-xs font-medium text-ink1 truncate">
-                  {folder ?? `${folderCandidates(sel)[0]}（未找到，显示根目录）`}
+                  {folder ?? `${folderCandidates(sel)[0]}（未找到或为空，显示根目录）`}
                 </span>
-                <button className="text-ink3 hover:text-accent" title="打开素材目录" onClick={() => openFolder(folder ? `${materialDir}/${folder}` : materialDir)}>
+                <button className="text-ink3 hover:text-accent" title="更换素材总目录" onClick={changeMaterialDir}>
                   <FolderOpen size={14} />
+                </button>
+                <button className="text-ink3 hover:text-accent" title="在资源管理器中打开" onClick={() => openFolder(folder ? `${materialDir}/${folder}` : materialDir)}>
+                  <ExternalLink size={14} />
                 </button>
               </div>
               <div className="text-[10px] text-ink3 leading-relaxed">

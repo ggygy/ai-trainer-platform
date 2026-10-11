@@ -67,6 +67,11 @@ export async function pathIsDir(path: string): Promise<boolean> {
   return invoke<boolean>("path_is_dir", { path });
 }
 
+export async function dirEntryCount(path: string): Promise<number> {
+  if (!isTauri()) return 0;
+  return invoke<number>("dir_entry_count", { path });
+}
+
 export type JupyterInfo = { running: boolean; url: string; log: string[] };
 
 export async function jupyterStart(dir: string): Promise<JupyterInfo> {

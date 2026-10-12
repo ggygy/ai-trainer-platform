@@ -45,3 +45,21 @@ uv 创建的 venv **不带 pip 模块**（包管理由 `uv pip` 承担），`pyt
 
 同时 uv 各步骤（装 uv、装 Python、建 venv）的 run_streamed 失败不再被静默忽略，逐条写安装
 日志并注明「将回退系统 pip」。
+
+## 修订（2026-10-13）：uv 缓存目录改为应用专属（issue #2）
+
+macOS 真实用户（v0.3.9）uv pip install 全体依赖时失败：`permission denied (os error 13)
+at path ~/.cache/uv/wheels-v5/...`。venv 本体正常（都解到 prompt-toolkit 的 wheel 了），
+坏的是 **uv 自己的缓存目录**——典型成因是曾用 `sudo` 跑过 uv，`~/.cache/uv` 属主变成 root，
+用户级进程写入即被拒。同一类坑也可能落在 `~/.local/share/uv`（托管解释器目录）上。
+
+应用数据目录内的路径由应用自己创建/管理，不受用户家目录历史污染影响，故 uv 全系调用
+（python install / venv / pip install）统一注入 `UV_CACHE_DIR=<应用数据>/uv-cache`
+（`uv_command()`）；探测不可写时回落系统临时目录，保证 uv 永远有可写缓存。缓存属瞬态
+数据，搬迁无迁移成本，也方便「删 uv-cache 重来」式自愈。
+
+同批修复安装日志的两个展示问题：① `run_streamed` 输出统一过 `clean_progress_line()`
+（mod.rs）——剥 ANSI 转义序列、`\r` 覆写式进度帧只留最后一帧，curl 进度条 / uv spinner
+经管道拼出的残行不再花屏；② uv pip install 失败时收集 stderr 尾部，识别出
+permission denied 就给「sudo chown 修属主 / 删应用环境目录重建」的可操作提示。
+前端安装日志换行由 break-all 改 break-words，numpy / onnxruntime 等包名不再从单词中间折断。

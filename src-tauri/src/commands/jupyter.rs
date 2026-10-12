@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
 use super::env::python_exe_path;
-use super::{no_window, shell_command};
+use super::{clean_progress_line, no_window, shell_command};
 
 pub struct JupyterState {
     child: Mutex<Option<Child>>,
@@ -238,7 +238,11 @@ pub fn jupyter_start(dir: String, state: State<'_, JupyterState>, app: AppHandle
     let adopt_stderr2 = adopt_stderr;
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
-        for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+        for raw in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let line = clean_progress_line(&raw);
+            if line.is_empty() {
+                continue;
+            }
             let _ = app2.emit("jupyter-log", serde_json::json!({ "line": line }));
             {
                 let mut t = tail2.lock().unwrap();

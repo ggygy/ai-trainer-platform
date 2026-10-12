@@ -366,7 +366,7 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
               {logs.map((l, i) => (
                 <div
                   key={i}
-                  className={`font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-all selectable ${
+                  className={`font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words selectable ${
                     l.startsWith("$") ? "text-blue-300" : l.startsWith("✓") ? "text-emerald-300" : l.startsWith("[错误]") || l.startsWith("!") ? "text-red-300" : "text-slate-300"
                   }`}
                 >

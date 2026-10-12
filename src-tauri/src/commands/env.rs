@@ -168,6 +168,36 @@ fn venv_python(dir: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
+/// 应用专属 uv 缓存目录（issue #2）：uv 默认写 ~/.cache/uv，该目录一旦被 sudo 运行的
+/// uv 污染成 root 属主，用户级 uv 装包解 wheel 时就报 permission denied (os error 13)。
+/// 改在应用数据目录里自管缓存（uv 全系命令都尊重 UV_CACHE_DIR）；连它也建不出来时
+/// （极端磁盘/权限状况）回落系统临时目录，保证 uv 永远拿到一个可写的缓存。
+fn uv_cache_dir() -> std::path::PathBuf {
+    let owned = app_data_root().join("uv-cache");
+    if std::fs::create_dir_all(&owned).is_ok() && dir_writable(&owned) {
+        return owned;
+    }
+    let fallback = std::env::temp_dir().join("ai-trainer-uv-cache");
+    let _ = std::fs::create_dir_all(&fallback);
+    fallback
+}
+
+fn dir_writable(dir: &std::path::Path) -> bool {
+    let probe = dir.join(".uv-cache-probe");
+    let ok = std::fs::File::create(&probe).is_ok();
+    if ok {
+        let _ = std::fs::remove_file(&probe);
+    }
+    ok
+}
+
+/// 所有 uv 调用统一带应用专属缓存环境变量
+fn uv_command(uv: &str) -> Command {
+    let mut c = Command::new(uv);
+    c.env("UV_CACHE_DIR", uv_cache_dir());
+    c
+}
+
 /// 应用 venv 的 python（存在才返回），绝对路径可直接 spawn
 pub(crate) fn app_venv_python() -> Option<String> {
     let p = venv_python(&app_venv_dir());
@@ -230,13 +260,13 @@ fn ensure_uv_and_venv(app: &AppHandle) -> Option<String> {
     let vpy = venv_python(&venv);
     if !vpy.is_file() {
         emit("正在安装 uv 托管的 Python 3.13（用户级，约 30MB，无需管理员）…");
-        let mut c = Command::new(&uv);
+        let mut c = uv_command(&uv);
         c.args(["python", "install", "3.13"]);
         if !run_streamed(c, app) {
             emit("! Python 3.13 下载未成功（网络原因），仍尝试创建 venv…");
         }
         emit(&format!("正在创建应用专属虚拟环境：{}", venv.display()));
-        let mut c = Command::new(&uv);
+        let mut c = uv_command(&uv);
         c.args(["venv"]).arg(&venv).args(["--python", "3.13"]);
         if !run_streamed(c, app) {
             emit("! venv 创建命令未成功");
@@ -578,10 +608,21 @@ pub fn install_packages(names: Vec<String>, app: AppHandle) {
         if let Some(vpy) = ensure_uv_and_venv(&app) {
             emit_line(&app, format!("$ uv pip install -U {list}（应用专属环境 {vpy}）"));
             let uv = uv_path().expect("ensure_uv_and_venv 成功则 uv 必在");
-            let mut c = Command::new(&uv);
+            let mut c = uv_command(&uv);
             c.args(["pip", "install", "--python", &vpy, "--upgrade"]);
             c.args(names.iter().map(String::as_str));
-            let ok = run_streamed(c, &app);
+            let (ok, err_tail) = run_streamed_capture(c, &app);
+            if !ok && err_tail.to_lowercase().contains("permission denied") {
+                emit_line(
+                    &app,
+                    format!(
+                        "[提示] 检测到写入被拒（permission denied）：多为历史 sudo 运行残留的 root 属主目录所致。\
+                         终端执行 `sudo chown -R $(whoami) \"$HOME/.cache\" \"$HOME/.local\"` 修复属主后重试；\
+                         若仍失败，删除应用环境目录 {} 后重新安装（缓存已改为应用专属路径，不再受 ~/.cache 污染影响）",
+                        app_venv_dir().display()
+                    ),
+                );
+            }
             emit_line(&app, if ok { "$ 安装完成 ✓".into() } else { "$ 安装失败，请查看上方日志".into() });
             let _ = app.emit("install-done", serde_json::json!({ "ok": ok }));
             return;
@@ -614,12 +655,18 @@ pub fn install_packages(names: Vec<String>, app: AppHandle) {
 /// 流式执行一条命令：stdout/stderr 逐行 emit 到 install-log，返回是否成功退出。
 /// 调用方自行构建 Command——Windows 上含参数/引号的命令必须直接 spawn，
 /// 走 cmd /C 拼串时内层引号会被 Rust 的 `\"` 转义破坏（见 ADR-0011 修订）。
-fn run_streamed(mut command: Command, app: &AppHandle) -> bool {
+fn run_streamed(command: Command, app: &AppHandle) -> bool {
+    run_streamed_capture(command, app).0
+}
+
+/// run_streamed 的收集版：附带清洗后的 stderr 尾部（最后 30 行），供失败归因
+/// （如按内容识别 permission denied 给针对性提示）。
+fn run_streamed_capture(mut command: Command, app: &AppHandle) -> (bool, String) {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     no_window(&mut command);
     let Ok(mut child) = command.spawn() else {
         let _ = app.emit("install-log", serde_json::json!({ "line": "[错误] 无法启动命令" }));
-        return false;
+        return (false, String::new());
     };
 
     let stdout = child.stdout.take().expect("stdout");
@@ -628,19 +675,34 @@ fn run_streamed(mut command: Command, app: &AppHandle) -> bool {
     let t1 = std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            let line = super::clean_progress_line(&line);
+            if line.is_empty() {
+                continue;
+            }
             let _ = app2.emit("install-log", serde_json::json!({ "line": line }));
         }
     });
     let app3 = app.clone();
     let t2 = std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
+        use std::collections::VecDeque;
+        let mut tail: VecDeque<String> = VecDeque::with_capacity(30);
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+            let line = super::clean_progress_line(&line);
+            if line.is_empty() {
+                continue;
+            }
+            if tail.len() == 30 {
+                tail.pop_front();
+            }
+            tail.push_back(line.clone());
             let _ = app3.emit("install-log", serde_json::json!({ "line": line }));
         }
+        tail.into_iter().collect::<Vec<_>>().join("\n")
     });
     t1.join().ok();
-    t2.join().ok();
-    child.wait().map(|s| s.success()).unwrap_or(false)
+    let err_tail = t2.join().unwrap_or_default();
+    (child.wait().map(|s| s.success()).unwrap_or(false), err_tail)
 }
 
 #[tauri::command]

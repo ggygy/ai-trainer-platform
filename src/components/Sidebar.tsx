@@ -6,14 +6,16 @@ import {
   TerminalSquare,
   ChartColumn,
   GraduationCap,
+  ClipboardList,
   CircleCheck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-export type PageId = "home" | "learn" | "exam" | "practical" | "practical-exam" | "env" | "report";
+export type PageId = "home" | "guide" | "learn" | "exam" | "practical" | "practical-exam" | "env" | "report";
 
 export const NAV: { id: PageId; icon: LucideIcon; label: string }[] = [
   { id: "home", icon: House, label: "首页" },
+  { id: "guide", icon: ClipboardList, label: "报考指南" },
   { id: "learn", icon: BookOpen, label: "理论学习" },
   { id: "exam", icon: Timer, label: "模拟考试" },
   { id: "practical", icon: Code, label: "实操训练" },

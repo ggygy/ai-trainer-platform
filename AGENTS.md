@@ -39,7 +39,7 @@ src/
     api.ts               # Tauri invoke 封装；isTauri() 为 false 时全部走浏览器 mock；Store 数据模型类型
     store.ts             # zustand + persist 全局状态（localStorage "atp.store.v1"，信封格式）；写状态必须走 action
     answers.ts           # 答案源合并：用户导入 > AI 参考（refAnswer，纯函数）
-  pages/                 # 7 个页面组件；深链接 ?page=<id>&paper=official&group=2.2&idx=0&ref=1
+  pages/                 # 8 个页面组件；深链接 ?page=<id>&paper=official&group=2.2&idx=0&ref=1
   components/            # ui.tsx 基础件、exam-ui.tsx 考试件、Sidebar
 src-tauri/src/commands/  # mod.rs 平台原语（shell_command：mac=zsh 登录壳 / win=cmd /C + CREATE_NO_WINDOW）
                          # env.rs 环境检测/安装（Python 优先 uv 托管：~/.local/bin/uv → uv python 3.13 → 应用专属 venv（mac ~/Library/Application Support/AI Trainer Prep/venv），检测/安装/Jupyter 一律 venv 优先，uv 失败回退系统 pip；（Python 候选探测：mac=python3，win=python→py -3→常见安装目录全路径回落；PEP 668 失败自动加 --break-system-packages；install_python 可应用内装 Python：win=winget/python.org 静默装、mac=下载官方 pkg 开图形安装器）

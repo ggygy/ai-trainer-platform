@@ -8,6 +8,7 @@ import {
   LoaderCircle,
   FolderOpen,
   ExternalLink,
+  BookOpenCheck,
 } from "lucide-react";
 import { Card, CardHead, Badge, Btn, Ghost, PageHead } from "../components/ui";
 import { DEPENDENCIES } from "../data/content";
@@ -27,10 +28,11 @@ import {
   type ToolInfo,
 } from "../lib/api";
 import { pickAndImportMaterials } from "../lib/materials";
+import type { PageId } from "../components/Sidebar";
 
 type Phase = "idle" | "detecting" | "installing";
 
-export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => void }) {
+export default function EnvAssistant({ onEnvChanged, go }: { onEnvChanged: () => void; go?: (p: PageId) => void }) {
   const [tools, setTools] = useState<ToolInfo[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [logs, setLogs] = useState<string[]>([]);
@@ -277,6 +279,14 @@ export default function EnvAssistant({ onEnvChanged }: { onEnvChanged: () => voi
             />
             <div className="text-[11px] text-ink3 mb-2.5 break-all leading-relaxed">
               {materialsReady ? "40 题考卷与数据已就绪。" : "素材包（约 220MB）不含在安装包内：从网盘下载 zip 后在此导入。"}
+              {!materialsReady && (
+                <button
+                  className="text-accent hover:underline underline-offset-2 ml-1 inline-flex items-center gap-0.5"
+                  onClick={() => go?.("guide")}
+                >
+                  <BookOpenCheck size={11} /> 下载与导入指引
+                </button>
+              )}
             </div>
             <div className="flex gap-2">
               <Btn primary className="!justify-center flex-1" onClick={runImport} disabled={importing}>

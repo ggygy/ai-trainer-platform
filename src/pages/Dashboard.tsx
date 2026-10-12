@@ -154,7 +154,7 @@ export default function Dashboard({ go, env }: { go: (p: PageId) => void; env: {
           </Card>
 
           <Card>
-            <CardHead title="考试信息" />
+            <CardHead title="考试信息" right={<Ghost onClick={() => go("guide")}>报考指南</Ghost>} />
             <div className="flex flex-col gap-2.5">
               {[
                 ["实操考核", `${EXAM_INFO.practical.minutes} 分钟 · 题库抽题`],

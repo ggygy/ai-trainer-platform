@@ -56,8 +56,9 @@ async function launchBrowser() {
   await page.goto(BASE + "/", { waitUntil: "networkidle" });
 
   // T1 侧边栏导航
-  await step("T1 侧边栏可进入全部 6 个主页面", async () => {
+  await step("T1 侧边栏可进入全部 7 个主页面", async () => {
     for (const [item, hint] of [
+      ["报考指南", "报名条件"],
       ["理论学习", "知识体系"],
       ["模拟考试", "理论模拟考试"],
       ["实操训练", "官方 40 题"],

@@ -63,6 +63,16 @@ export async function openFolder(path: string): Promise<void> {
   await invoke("open_folder", { path });
 }
 
+/** 用系统默认浏览器打开外部链接（Tauri webview 内 window.open 外部 http 会被拦） */
+export async function openExternal(url: string): Promise<void> {
+  if (!isTauri()) {
+    window.open(url, "_blank");
+    return;
+  }
+  const { openUrl } = await import("@tauri-apps/plugin-opener");
+  await openUrl(url);
+}
+
 export async function pathIsDir(path: string): Promise<boolean> {
   if (!isTauri()) return false;
   return invoke<boolean>("path_is_dir", { path });

@@ -18,10 +18,11 @@
 | [0012](0012-macos-signing-notarization.md) | macOS Developer ID 签名+公证接入 CI（Secrets 缺省自动降级未签名） | 已接受 | 2026-10-10 |
 | [0013](0013-versioned-releases.md) | 版本化发布：push 快照预发布 + 手动触发正式 Release（版本号三处同步） | 已接受 | 2026-10-10 |
 | [0014](0014-uv-managed-python.md) | uv 托管 Python：用户级 uv + 托管 3.13 + 应用专属 venv，绕开系统 Python 全部坑 | 已接受 | 2026-10-10 |
+| [0015](0015-materials-distribution.md) | 实操素材包分发：网盘 + 应用内导入 | 已接受 | 2026-10-11 |
+| [0016](0016-in-app-updater.md) | 应用内更新：tauri-plugin-updater + GitHub Releases 自更新 | 已接受 | 2026-10-13 |
 
 ## 新增 ADR 的约定
 
 - 文件名：`NNNN-短横线英文标题.md`，编号递增不复用。
 - 内容至少包含：状态、日期、背景（为什么需要决策）、决策（选了什么、放弃什么）、后果（正/负两面）。
 - 推翻旧决策时不要删文件：把旧 ADR 状态改为「被 NNNN 取代」，并更新本索引。
-- [0015 — 实操素材包分发：网盘 + 应用内导入](0015-materials-distribution.md)

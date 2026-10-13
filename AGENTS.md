@@ -15,7 +15,7 @@ source ~/.cargo/env && export PATH="$HOME/.nvm/versions/node/v22.12.0/bin:$PATH"
 npm run dev            # 仅前端（vite，端口 1420，浏览器可用，Tauri API 走 mock）
 npm run tauri dev      # 完整桌面应用（首次编译较慢，rsproxy 镜像已配置在 ~/.cargo/config.toml）
 npm run build          # tsc（严格模式）+ vite 生产构建 —— 交付前必跑
-npm run test:ui        # playwright-core + 系统 Edge 无头 E2E（8 场景，需 vite dev 已在 1420 运行）
+npm run test:ui        # playwright-core + 系统 Edge 无头 E2E（9 场景，需 vite dev 已在 1420 运行）
 npm run test:full      # 全真模考完整回归：导入答案→官方卷 190 题全答→判分 100→落库（同样需 vite dev）
 cd src-tauri && cargo check   # Rust 侧类型检查
 ```
@@ -39,8 +39,9 @@ src/
     api.ts               # Tauri invoke 封装；isTauri() 为 false 时全部走浏览器 mock；Store 数据模型类型
     store.ts             # zustand + persist 全局状态（localStorage "atp.store.v1"，信封格式）；写状态必须走 action
     answers.ts           # 答案源合并：用户导入 > AI 参考（refAnswer，纯函数）
+    updater.ts           # 应用内更新封装（plugin-updater）：检查/下载进度/重启；APP_VERSION 取自 package.json
   pages/                 # 8 个页面组件；深链接 ?page=<id>&paper=official&group=2.2&idx=0&ref=1
-  components/            # ui.tsx 基础件、exam-ui.tsx 考试件、Sidebar
+  components/            # ui.tsx 基础件、exam-ui.tsx 考试件、Sidebar（底部含检查更新入口）、UpdateModal 更新弹窗
 src-tauri/src/commands/  # mod.rs 平台原语（shell_command：mac=zsh 登录壳 / win=cmd /C + CREATE_NO_WINDOW）
                          # env.rs 环境检测/安装（Python 优先 uv 托管：~/.local/bin/uv → uv python 3.13 → 应用专属 venv（mac ~/Library/Application Support/AI Trainer Prep/venv），检测/安装/Jupyter 一律 venv 优先，uv 失败回退系统 pip；（Python 候选探测：mac=python3，win=python→py -3→常见安装目录全路径回落；PEP 668 失败自动加 --break-system-packages；install_python 可应用内装 Python：win=winget/python.org 静默装、mac=下载官方 pkg 开图形安装器）
                          # jupyter.rs 子进程起停（端口 8889，stderr 流式解析 token；win 停止用 taskkill /T 杀进程树）
@@ -75,6 +76,12 @@ scripts/mock-full.mjs    # 全真模考完整回归（190 题全卷）
 - 深链接参数是正式功能，改动页面初始状态逻辑时保持兼容。
 - 浏览器 mock 与 Tauri 真机行为有差异（安装/Jupyter 是假数据）；涉及 Rust 命令的改动需在 `npm run tauri dev` 真机里人工验证。
 - 考试交卷写历史的 effect 有 savedRef 守卫，重构时不要丢。
+- **应用内更新（ADR-0016）**：端点 `releases/latest/download/latest.json` 只命中非预发布 Release，
+  快照上的清单不会推给用户；latest.json 由 build.yml 的 publish job 生成（版本号取 package.json）。
+  Windows 上 `downloadAndInstall` 拉起安装器后进程退出、Promise 不 resolve，别在其后写关键逻辑。
+  签名私钥在 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`，本地备份 `~/Documents/ai-trainer-prep-updater.key`，
+  丢失=更新链路报废。本地验证 updater 产物用 `npx tauri build --bundles app`（dmg 的 AppleScript 在本机会卡死，
+  且失败会中止后续 updater 产物生成）。
 
 ## 验证流程（改动的最低验收标准）
 

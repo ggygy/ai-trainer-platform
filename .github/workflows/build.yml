@@ -1,6 +1,10 @@
 # 每次推送到 main：快照构建（预发布 tag vX.Y.Z-日期-sha）；release.yml 触发时为正式发布
 # （tag 形如 v0.2.0，Release 标记 latest 非预发布）。产物：dmg（arm64，配置了 APPLE_* Secrets
-# 时自动 Developer ID 签名+公证）+ NSIS exe（x64），下载见 Releases 页 assets。
+# 时自动 Developer ID 签名+公证）+ NSIS exe（x64）+ 应用内更新产物（macOS .app.tar.gz+sig /
+# Windows setup.exe+sig）+ latest.json 更新清单，下载见 Releases 页 assets。
+# 更新清单用 TAURI_SIGNING_PRIVATE_KEY 对产物做 minisign 签名，公钥在 tauri.conf 的
+# plugins.updater.pubkey；latest.json 由 publish job 生成——releases/latest/download/latest.json
+# 只会命中非预发布 Release，快照上的清单不会推给用户。
 #
 # 发布集中在末尾的 publish job：两个平台都构建成功、产物经由 artifacts 汇合后才创建 Release。
 # 早期版本由各平台 job 各自创建/上传 Release，中途被取消（如同并发组内新 push 抢占）会留下
@@ -65,10 +69,13 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
       - name: 构建 Tauri 应用
         if: env.SIGNED != 'true'
         run: npm run tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
       - name: 校验签名与公证
         if: env.SIGNED == 'true'
@@ -94,7 +101,10 @@ jobs:
           mkdir -p release
           VER=$(node -p "require('./package.json').version")
           cp src-tauri/target/release/bundle/dmg/*.dmg "release/ai-trainer-platform_${VER}_aarch64.dmg"
-          shasum -a 256 release/*.dmg > release/checksums-mac.txt
+          # 应用内更新产物（updater 下载的就是这个 tar.gz，sig 内嵌进 latest.json）
+          cp src-tauri/target/release/bundle/macos/*.app.tar.gz "release/ai-trainer-platform_${VER}_aarch64.app.tar.gz"
+          cp src-tauri/target/release/bundle/macos/*.app.tar.gz.sig "release/ai-trainer-platform_${VER}_aarch64.app.tar.gz.sig"
+          shasum -a 256 release/*.dmg release/*.app.tar.gz > release/checksums-mac.txt
 
       - name: 记录签名状态
         id: sign_flag
@@ -130,12 +140,16 @@ jobs:
 
       - name: 构建 Tauri 应用（NSIS 安装包）
         run: npm run tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
       - name: 规范化安装包文件名（GitHub assets 不支持非 ASCII 名）
         run: |
           mkdir -p release
           VER=$(node -p "require('./package.json').version")
           cp src-tauri/target/release/bundle/nsis/*-setup.exe "release/ai-trainer-platform_${VER}_x64-setup.exe"
+          # Windows 的更新产物就是 setup.exe 本体，sig 内嵌进 latest.json
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe.sig "release/ai-trainer-platform_${VER}_x64-setup.exe.sig"
           sha256sum release/*.exe > release/checksums-win.txt
 
       - uses: actions/upload-artifact@v4
@@ -153,6 +167,14 @@ jobs:
       SIGNED: ${{ needs.build-macos.outputs.signed }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # latest.json 的更新说明取「上个正式 tag 以来的提交」，需要完整历史与 tags
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - uses: actions/download-artifact@v4
         with:
@@ -172,6 +194,38 @@ jobs:
           else
             echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: 生成应用内更新清单 latest.json
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          MAC_SIG=$(cat "dist/ai-trainer-platform_${VER}_aarch64.app.tar.gz.sig")
+          WIN_SIG=$(cat "dist/ai-trainer-platform_${VER}_x64-setup.exe.sig")
+          # 更新说明 = 上个正式 tag 以来的提交（排除发版 bump），用户在应用内更新弹窗里看到
+          PREV=$(git tag --list | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vx "$TAG" | sort -rV | head -1 || true)
+          if [ -n "$PREV" ]; then
+            NOTES=$(git log --oneline --no-merges "$PREV..HEAD" | grep -v "chore(release)" | head -40)
+          else
+            NOTES=$(git log --oneline --no-merges -20 | grep -v "chore(release)" | head -40)
+          fi
+          [ -n "$NOTES" ] || NOTES="版本 $TAG"
+          echo "== 更新说明（$PREV → $TAG）"; echo "$NOTES"
+          node -e '
+            const fs = require("fs");
+            const [ver, tag, macSig, winSig, notes] = process.argv.slice(1);
+            const base = `https://github.com/ggygy/ai-trainer-platform/releases/download/${tag}`;
+            fs.writeFileSync("dist/latest.json", JSON.stringify({
+              version: ver,
+              notes,
+              pub_date: new Date().toISOString(),
+              platforms: {
+                "darwin-aarch64": { signature: macSig, url: `${base}/ai-trainer-platform_${ver}_aarch64.app.tar.gz` },
+                "windows-x86_64": { signature: winSig, url: `${base}/ai-trainer-platform_${ver}_x64-setup.exe` },
+              },
+            }, null, 2) + "\n");
+            console.log("latest.json 已生成");
+          ' "$VER" "$TAG" "$MAC_SIG" "$WIN_SIG" "$NOTES"
 
       - name: 创建 Release 并上传全部产物
         env:
@@ -193,6 +247,7 @@ jobs:
             fi
             echo "- Windows 安装：未做代码签名，SmartScreen 弹出时点「更多信息 → 仍要运行」"
             echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
+            echo "- 应用内更新：侧边栏底部「检查更新」可自动下载并安装新版本（v0.4.0 起支持，旧版需手动装本页安装包）"
             echo "- 实操题素材包（约 220MB）不含在安装包内：从网盘下载 zip 后在「环境助手 → 实操素材包」导入"
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"
           } > release-notes.md

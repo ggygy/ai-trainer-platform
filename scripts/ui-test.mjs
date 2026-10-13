@@ -202,6 +202,17 @@ async function launchBrowser() {
     await see("理论模拟考试");
   });
 
+  // T9 应用内更新入口：侧边栏入口可见，浏览器预览模式弹窗降级提示（桌面应用才会真正检查）
+  await step("T9 检查更新：侧边栏入口 + 弹窗预览模式降级", async () => {
+    await nav("首页").click();
+    await see("备考总览");
+    await page.getByRole("button", { name: /检查更新 · v/ }).click();
+    await see("无法完成检查");
+    await see("浏览器预览模式不支持更新检查");
+    await page.keyboard.press("Escape"); // 错误态允许 Esc 关闭
+    await page.getByText("浏览器预览模式不支持更新检查").waitFor({ state: "hidden", timeout: 4000 });
+  });
+
   await browser.close();
 }
 

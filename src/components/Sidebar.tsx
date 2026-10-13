@@ -8,6 +8,7 @@ import {
   GraduationCap,
   ClipboardList,
   CircleCheck,
+  RefreshCw,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -28,11 +29,17 @@ export default function Sidebar({
   onNavigate,
   envOk,
   envText,
+  version,
+  hasUpdate,
+  onCheckUpdate,
 }: {
   page: PageId;
   onNavigate: (p: PageId) => void;
   envOk: boolean | null;
   envText?: string;
+  version?: string;
+  hasUpdate?: boolean;
+  onCheckUpdate?: () => void;
 }) {
   return (
     <aside className="w-[232px] shrink-0 h-full bg-surface border-r border-line flex flex-col px-3.5 py-4.5 gap-2">
@@ -65,6 +72,26 @@ export default function Sidebar({
       </nav>
       <div className="flex-1" />
       <div className="h-px bg-line mx-0.5" />
+      {onCheckUpdate && (
+        <button onClick={onCheckUpdate} className="flex items-center gap-1.5 px-1 mt-1.5 group text-left">
+          {hasUpdate ? (
+            <>
+              <span className="relative flex shrink-0">
+                <RefreshCw size={13} className="text-accent" />
+                <span className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-accent ring-2 ring-surface" />
+              </span>
+              <span className="text-[11px] text-accent font-medium">发现新版本，点击更新</span>
+            </>
+          ) : (
+            <>
+              <RefreshCw size={13} className="text-ink3 shrink-0 group-hover:text-ink2" />
+              <span className="text-[11px] text-ink3 group-hover:text-ink2">
+                检查更新{version ? ` · v${version}` : ""}
+              </span>
+            </>
+          )}
+        </button>
+      )}
       {envText && (
         <div className="flex items-center gap-1.5 px-1 mt-1.5">
           {envOk === true && <CircleCheck size={13} className="text-ok" />}

@@ -136,8 +136,11 @@ export const EXAM_INFO = {
 // 信息整理自社区备考攻略（2026-09）与上海交大高技能人才培训中心公开通知，
 // 属参考性质：报名条件 / 渠道 / 补贴以官方最新通知为准，页面已标注。
 export const GUIDE_LINKS = {
-  sjtuSkill: "https://gjzs.sjtu.edu.cn/skill", // 官方通知与实操素材下载入口
+  sjtuSkill: "https://gjzs.sjtu.edu.cn/skill", // 官方页：通知公告 + 资源下载
   sjtuNotice: "https://gjzs.sjtu.edu.cn/blog/details/Skill-2026/118", // 报名通知（附件 1 为详细要求）
+  // 以下为官网「资源下载」区直链（2026-10 核对）
+  officialMaterials: "https://pan.baidu.com/s/1ZcCimGdRYB4S1RKYFzdeGw?pwd=v7xu", // 人工智能训练师（三级、四级）素材，提取码 v7xu
+  officialManual3: "https://gjzs.sjtu.edu.cn/uploads/addons/skill/4-04-05-05_3_20250701.zip", // 三级指导手册：认定方案/细目表/理论复习题/模拟卷
 };
 
 export const REG_CONDITIONS = [

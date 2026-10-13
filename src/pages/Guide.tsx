@@ -27,7 +27,7 @@ export default function Guide({ go }: { go: (p: PageId) => void }) {
         right={
           <>
             <Btn onClick={() => openExternal(GUIDE_LINKS.sjtuSkill)}>
-              <ExternalLink size={14} /> 官方通知（交大）
+              <ExternalLink size={14} /> 官方通知与下载（交大）
             </Btn>
             <Btn primary onClick={() => go("env")}>
               <Download size={14} /> 去环境助手导入素材
@@ -123,9 +123,12 @@ export default function Guide({ go }: { go: (p: PageId) => void }) {
                 icon={<Package size={15} className="text-accent shrink-0" />}
                 title="实操素材（40 题 · 约 220MB）"
                 lines={[
-                  "官方渠道：交大官网下载「人工智能训练师（三级/四级）」素材",
-                  "或使用随资料分享的「素材包-完整版.zip」（网盘分发）",
-                  "导入：环境助手点「导入素材包(.zip)」→ 选中 zip → 自动解压并指认目录，无需手动解压",
+                  "应用素材包「素材包-完整版.zip」：按本应用 40 题布局打包（随资料分享获取），导入后自动指认目录，无需手动解压",
+                  "官方原始素材（三级、四级，百度网盘 · 提取码 v7xu）：原始资料布局，与本应用考卷目录不同，供对照参考",
+                ]}
+                links={[
+                  { label: "官方素材网盘", url: GUIDE_LINKS.officialMaterials },
+                  { label: "三级指导手册（zip）", url: GUIDE_LINKS.officialManual3 },
                 ]}
                 action={
                   <Btn className="!justify-center" onClick={() => go("env")}>
@@ -183,11 +186,13 @@ function ResourceRow({
   icon,
   title,
   lines,
+  links,
   action,
 }: {
   icon: React.ReactNode;
   title: string;
   lines: string[];
+  links?: { label: string; url: string }[];
   action: React.ReactNode;
 }) {
   return (
@@ -201,6 +206,19 @@ function ResourceRow({
           {l}
         </div>
       ))}
+      {links && links.length > 0 && (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 pl-[23px] mt-0.5">
+          {links.map((l) => (
+            <button
+              key={l.url}
+              onClick={() => openExternal(l.url)}
+              className="inline-flex items-center gap-1 text-[11px] text-accent hover:underline underline-offset-2"
+            >
+              <ExternalLink size={11} /> {l.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="pl-[23px] mt-0.5">{action}</div>
     </div>
   );

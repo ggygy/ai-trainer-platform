@@ -19,7 +19,7 @@ dependencies = [
 
 [[package]]
 name = "ai-trainer-platform"
-version = "0.3.11"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",

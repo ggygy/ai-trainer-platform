@@ -19,6 +19,13 @@ xattr -cr "/Applications/AI Trainer Prep.app"
 
 **Windows**（`*_x64-setup.exe`）：未做代码签名，SmartScreen 弹出时点「更多信息 → 仍要运行」。
 
+## 应用内更新
+
+v0.4.0 起支持应用内自更新：侧边栏底部「检查更新」可自动下载并安装新版本
+（下载 → 验签 → 安装 → 重启，全程无需浏览器），启动时也会静默检查并在发现新版时提示。
+更新源为 GitHub Releases（minisign 签名校验）；网络不佳或下载失败时可在更新弹窗里
+直达 Releases 页手动下载。v0.4.0 之前的版本需要手动安装一次 v0.4.0+，此后即可应用内更新。
+
 ## 发版流程
 
 - **日常快照**：push 到 `main` 自动构建 Pre-release（tag `v版本-日期-sha`），用于随时尝鲜；

@@ -20,6 +20,7 @@
 | [0014](0014-uv-managed-python.md) | uv 托管 Python：用户级 uv + 托管 3.13 + 应用专属 venv，绕开系统 Python 全部坑 | 已接受 | 2026-10-10 |
 | [0015](0015-materials-distribution.md) | 实操素材包分发：网盘 + 应用内导入 | 已接受 | 2026-10-11 |
 | [0016](0016-in-app-updater.md) | 应用内更新：tauri-plugin-updater + GitHub Releases 自更新 | 已接受 | 2026-10-13 |
+| [0017](0017-jupyter-ws-append-token.md) | 内嵌 Jupyter 内核 WS 认证改 URL token（appendToken），绕开三方 cookie 拦截 | 已接受 | 2026-10-20 |
 
 ## 新增 ADR 的约定
 

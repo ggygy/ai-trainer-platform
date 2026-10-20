@@ -95,32 +95,34 @@ fn resolve_launch() -> Option<JupyterLaunch> {
     }
 }
 
-/// 允许被 Tauri WebView（异源）内嵌所需的三类参数：
+/// 允许被 Tauri WebView（异源）内嵌所需的参数：
 /// ① CSP frame-ancestors：jupyter 4.x 默认 'self'，iframe 会被浏览器静默拦截；
 /// ② SameSite=None(+Secure)：跨站 iframe 里 Lax cookie 一律不收不发——实测 Chromium 下
 ///    连 `?token=` 自动登录都会被拦（会话 cookie 种不上，永远弹登录墙）；
 /// ③ allow_origin='*'(+credentials)：内核通道走 WebSocket，跨站 iframe 的 WS 握手带
-///    Origin: tauri.localhost，默认仅同源 → 403，症状是文件浏览器正常、内核永远
-///    「Connecting」、cell 跑不了。
+///    Origin: tauri.localhost，默认仅同源 → 403；
+/// ④ page_config_data.appendToken：kernel 通道 WS 无法带 Authorization header，浏览器
+///    WebSocket API 又不给设自定义 header——认证全靠 cookie。Edge/WebView2 155 起跨站
+///    iframe 默认拦截第三方 cookie（SameSite=None 也照拦），REST API 因前端带 token
+///    header 一切正常、唯独 WS 403，症状是文件浏览器能用、内核永远「Disconnected」
+///    （issue #6）。appendToken=true 让 Lab 前端把 token 追加进每个 WS URL（URL 查询参数
+///    认证服务端本来就支持），彻底绕开 cookie。
+///    注：服务端没有 appendToken 这个配置项，只能借 tornado_settings 预置 page_config_data
+///    （LabApp 对该 dict 是 setdefault/update，不会覆盖我们注入的键）。
 /// 注意 tornado_settings 的值必须是 **Python 字面量**（True 大写）：traitlets 用
 /// literal_eval 解析 dict 参数，JSON 的 `true` 会报 "expected a dict, not the list"。
 fn embed_args(lab_major: u32) -> Vec<String> {
     let settings = if lab_major >= 4 {
-        "{'headers':{'Content-Security-Policy':'frame-ancestors *'},'cookie_options':{'samesite':'None','secure':True},'xsrf_cookie_kwargs':{'samesite':'None','secure':True}}"
+        "{'headers':{'Content-Security-Policy':'frame-ancestors *'},'cookie_options':{'samesite':'None','secure':True},'xsrf_cookie_kwargs':{'samesite':'None','secure':True},'page_config_data':{'appendToken':'true'}}"
     } else {
-        "{'headers':{'Content-Security-Policy':'frame-ancestors *'}}"
+        "{'headers':{'Content-Security-Policy':'frame-ancestors *'},'page_config_data':{'appendToken':'true'}}"
     };
-    let mut v = vec![
+    vec![
         format!("--ServerApp.tornado_settings={settings}"),
         // ServerApp trait，jupyter_server 1.x/2.x 都有，旧版也安全
         "--ServerApp.allow_origin=*".into(),
         "--ServerApp.allow_credentials=True".into(),
-    ];
-    if lab_major >= 4 {
-        // 关掉右下角 Jupyter 新闻弹窗（内嵌视图里没地方设置，很碍事）；LabApp trait，仅新版保证存在
-        v.push("--LabApp.news_disable=True".into());
-    }
-    v
+    ]
 }
 
 /// 无外部依赖的随机 token（RandomState 每实例由系统熵播种）

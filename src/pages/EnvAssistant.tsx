@@ -344,7 +344,8 @@ export default function EnvAssistant({ onEnvChanged, go }: { onEnvChanged: () =>
               title="安装队列"
               right={phase === "installing" ? <Badge tone="accent">进行中</Badge> : <Badge tone="muted">空闲</Badge>}
             />
-            <div className="flex flex-col gap-2">
+            {/* 缺失项多时内部滚动：此前整卡撑高把下方「安装日志」压到只剩两三行（issue #5 显示不全） */}
+            <div className="flex flex-col gap-2 max-h-[128px] overflow-y-auto">
               {missing.length === 0 ? (
                 <div className="text-xs text-ink3">没有待安装的依赖 ✓</div>
               ) : (
@@ -365,9 +366,9 @@ export default function EnvAssistant({ onEnvChanged, go }: { onEnvChanged: () =>
             </div>
           </Card>
 
-          <Card className="flex-1 min-h-0 flex flex-col">
+          <Card className="flex-1 min-h-[190px] flex flex-col">
             <CardHead title="安装日志" right={<Ghost onClick={() => setLogs([])}>清空</Ghost>} />
-            <div ref={logRef} className="flex-1 min-h-0 overflow-y-auto rounded-[10px] bg-inkwell p-3.5 flex flex-col gap-1">
+            <div ref={logRef} className="flex-1 min-h-0 overflow-y-auto rounded-[10px] bg-inkwell p-3.5 flex flex-col gap-[3px]">
               {logs.length === 0 && (
                 <div className="font-mono text-[11px] leading-relaxed text-slate-500 whitespace-pre-wrap select-none">
                   {"$ 等待操作…\n\n点击「一键安装缺失依赖」开始安装；\n检测与安装日志都会显示在这里。"}
@@ -376,7 +377,7 @@ export default function EnvAssistant({ onEnvChanged, go }: { onEnvChanged: () =>
               {logs.map((l, i) => (
                 <div
                   key={i}
-                  className={`font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words selectable ${
+                  className={`font-mono text-[11px] leading-[1.55] whitespace-pre-wrap break-words selectable ${
                     l.startsWith("$") ? "text-blue-300" : l.startsWith("✓") ? "text-emerald-300" : l.startsWith("[错误]") || l.startsWith("!") ? "text-red-300" : "text-slate-300"
                   }`}
                 >

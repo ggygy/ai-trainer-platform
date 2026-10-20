@@ -39,8 +39,50 @@ function buildOfficialPaper(): { paper: Q[]; key: Record<string, string> } {
   return { paper: [...j, ...s, ...m], key };
 }
 
-export default function TheoryExam({ autoOfficial }: { autoOfficial?: boolean }) {
-  const [config, setConfig] = useState<{ j: number; s: number; m: number; official: boolean } | null>(null);
+/** 错题本 → 重练卷：oj/os/om+卷内序号 取官方卷题（官方答案判分），j/s/m+题库id 取 900 题库题
+ *  （用户导入 > AI 参考判分）；判分答案统一收进 answerMap 走 ResultScreen 的 officialKey 通路 */
+function buildWrongPaper(): { paper: Q[]; key: Record<string, string> } | null {
+  const wb = useStore.getState().wrongBook;
+  if (!wb.length) return null;
+  const store = useStore.getState();
+  const pair = (opts: string[]) => opts.map((t, i) => [String.fromCharCode(65 + i), t] as [string, string]);
+  const paper: Q[] = [];
+  const key: Record<string, string> = {};
+  for (const w of wb) {
+    let mo: RegExpMatchArray | null;
+    if ((mo = w.id.match(/^o([jsm])(\d+)$/))) {
+      // 官方卷错题：type 由 jsm 决定，id 为卷内序号 n
+      const type = mo[1] === "j" ? "judge" : mo[1] === "s" ? "single" : "multi";
+      const n = parseInt(mo[2]);
+      const q: { n: number; stem: string; answer: string; options?: string[] } | undefined =
+        type === "judge"
+          ? officialPaper.judge.find((x) => x.n === n)
+          : (type === "single" ? officialPaper.single : officialPaper.multi).find((x) => x.n === n);
+      if (!q) continue;
+      const prefix = `o${mo[1]}`;
+      paper.push({ key: `${prefix}${n}`, type, id: n, stem: q.stem, options: type === "judge" ? [] : pair(q.options ?? []) });
+      key[`${prefix}${n}`] = q.answer;
+    } else if ((mo = w.id.match(/^([jsm])(\d+)$/))) {
+      const type = mo[1] === "j" ? "judge" : mo[1] === "s" ? "single" : "multi";
+      const id = parseInt(mo[2]);
+      const q: { id: number; stem: string; options?: [string, string][] } | undefined =
+        type === "judge"
+          ? bank.judge.find((x) => x.id === id)
+          : bank[type === "single" ? "single" : "multi"].find((x) => x.id === id);
+      if (!q) continue;
+      const ans = refAnswer(store, type, id)?.a;
+      if (!ans) continue; // 无任何参考答案的题无法判分，跳过
+      paper.push({ key: `${mo[1]}${id}`, type, id, stem: q.stem, options: q.options ?? [] });
+      key[`${mo[1]}${id}`] = ans;
+    }
+  }
+  return paper.length ? { paper, key } : null;
+}
+
+type Mode = "normal" | "official" | "wrong";
+
+export default function TheoryExam({ autoPaper }: { autoPaper?: "official" | "wrong" | null }) {
+  const [config, setConfig] = useState<{ j: number; s: number; m: number; mode: Mode } | null>(null);
   const [officialKey, setOfficialKey] = useState<Record<string, string> | null>(null);
   const [paper, setPaper] = useState<Q[] | null>(null);
   const [answers, setAnswers] = useState<Record<string, string[]>>({});
@@ -50,19 +92,19 @@ export default function TheoryExam({ autoOfficial }: { autoOfficial?: boolean })
   const [finished, setFinished] = useState(false);
 
   const start = (j: number, s: number, m: number) => {
-    setConfig({ j, s, m, official: false });
+    setConfig({ j, s, m, mode: "normal" });
     setOfficialKey(null);
     setPaper(buildPaper(j, s, m));
     setAnswers({});
     setMarked(new Set());
     setCur(0);
-    setSeconds(j === 190 ? 90 * 60 : Math.round((j + s + m) * 90 * 60 / 190));
+    setSeconds(Math.round((j + s + m) * 90 * 60 / 190));
     setFinished(false);
   };
 
   const startOfficial = () => {
     const { paper, key } = buildOfficialPaper();
-    setConfig({ j: 40, s: 140, m: 10, official: true });
+    setConfig({ j: 40, s: 140, m: 10, mode: "official" });
     setOfficialKey(key);
     setPaper(paper);
     setAnswers({});
@@ -72,19 +114,36 @@ export default function TheoryExam({ autoOfficial }: { autoOfficial?: boolean })
     setFinished(false);
   };
 
+  const startWrong = () => {
+    const r = buildWrongPaper();
+    if (!r) return;
+    const cnt = (t: Q["type"]) => r.paper.filter((q) => q.type === t).length;
+    setConfig({ j: cnt("judge"), s: cnt("single"), m: cnt("multi"), mode: "wrong" });
+    setOfficialKey(r.key);
+    setPaper(r.paper);
+    setAnswers({});
+    setMarked(new Set());
+    setCur(0);
+    setSeconds(Math.max(Math.round(r.paper.length * 90 * 60 / 190), 5 * 60));
+    setFinished(false);
+  };
+
   useEffect(() => {
-    if (autoOfficial) startOfficial();
+    if (autoPaper === "official") startOfficial();
+    else if (autoPaper === "wrong") startWrong();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!paper || !config) return <StartScreen onStart={start} onOfficial={startOfficial} />;
+  if (!paper || !config)
+    return <StartScreen onStart={start} onOfficial={startOfficial} onWrong={startWrong} />;
   if (finished)
     return (
       <ResultScreen
         paper={paper}
         answers={answers}
         elapsedMin={Math.round((totalSeconds(config) - seconds) / 60)}
-        officialKey={config.official ? officialKey : null}
+        officialKey={config.mode !== "normal" ? officialKey : null}
+        mode={config.mode}
         again={() => setPaper(null)}
         marked={marked}
       />
@@ -109,7 +168,9 @@ export default function TheoryExam({ autoOfficial }: { autoOfficial?: boolean })
       <div className="h-14 shrink-0 bg-surface border border-line rounded-xl px-5 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <span className="text-[15px] font-bold text-ink1">理论模拟考试</span>
-          {config.official ? <Badge tone="ok">官方全真卷</Badge> : <Badge tone="accent">模拟模式</Badge>}
+            {config.mode === "official" && <Badge tone="ok">官方全真卷</Badge>}
+            {config.mode === "wrong" && <Badge tone="warn">错题重练</Badge>}
+            {config.mode === "normal" && <Badge tone="accent">模拟模式</Badge>}
           <span className="text-xs text-ink3">
             判断 {config.j} · 单选 {config.s} · 多选 {config.m}
           </span>
@@ -265,13 +326,16 @@ function JudgeRow({ label, selected, onClick }: { label: string; selected: boole
 function StartScreen({
   onStart,
   onOfficial,
+  onWrong,
 }: {
   onStart: (j: number, s: number, m: number) => void;
   onOfficial: () => void;
+  onWrong: () => void;
 }) {
   const answerKey = useStore((s) => s.answerKey);
   const importAnswers = useStore((s) => s.importAnswers);
   const clearAnswers = useStore((s) => s.clearAnswers);
+  const wrongN = useStore((s) => s.wrongBook.length);
   const [preset, setPreset] = useState<"official" | "full" | "half" | "quick">("official");
   const [answerText, setAnswerText] = useState("");
   const presets = {
@@ -320,6 +384,26 @@ function StartScreen({
           );
         })}
       </div>
+
+      <Card className="mt-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <RotateCw size={15} className="text-warn shrink-0" />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[15px] font-semibold text-ink1">错题重练</span>
+                <Badge tone={wrongN ? "warn" : "muted"}>{wrongN ? `${wrongN} 题待重练` : "暂无错题"}</Badge>
+              </div>
+              <div className="text-xs text-ink2 mt-1 leading-relaxed">
+                用错题本出一张专属卷：交卷后答对的题自动移出错题本，答错的保留并累计次数，直到清空为止。
+              </div>
+            </div>
+          </div>
+          <Btn primary onClick={onWrong} disabled={!wrongN}>
+            <RotateCw size={14} /> 开始重练
+          </Btn>
+        </div>
+      </Card>
 
       <Card className="mt-5">
         <div className="flex items-center justify-between">
@@ -372,6 +456,7 @@ function ResultScreen({
   answers,
   elapsedMin,
   officialKey,
+  mode,
   again,
   marked,
 }: {
@@ -379,6 +464,7 @@ function ResultScreen({
   answers: Record<string, string[]>;
   elapsedMin: number;
   officialKey: Record<string, string> | null;
+  mode: Mode;
   again: () => void;
   marked: Set<string>;
 }) {
@@ -394,17 +480,17 @@ function ResultScreen({
     });
     let score = 0, total = 0, userN = 0, aiLow = 0;
     for (const v of perQ) {
-      const w = officialKey
+      const w = mode === "official"
         ? officialPaper.meta.scores[v.q.type === "judge" ? "judge" : v.q.type === "single" ? "single" : "multi"]
         : 1;
       total += w;
       if (v.ok) score += w;
       if (v.src === "user") userN++;
-      if (!officialKey && v.src === "ai" && v.conf === "low") aiLow++;
+      if (mode === "normal" && v.src === "ai" && v.conf === "low") aiLow++;
     }
     return { perQ, score: total ? Math.round((score / total) * 100) : 0, userN, aiLow };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paper, answers, officialKey, store]);
+  }, [paper, answers, officialKey, mode, store]);
 
   const correct = verdict.perQ.filter((v) => v.ok).length;
   const minutes = elapsedMin;
@@ -413,13 +499,20 @@ function ResultScreen({
   useEffect(() => {
     if (savedRef.current) return; // StrictMode 下 effect 跑两次，避免重复记录成绩
     savedRef.current = true;
-    // 刷题统计：非官方卷中实际作答过的题计入 theoryDone（官方卷 190 题不属于 900 题库）
-    const theoryKeys = officialKey ? [] : verdict.perQ.filter((v) => answers[v.q.key]?.length).map((v) => v.q.key);
+    // 刷题统计：官方卷 190 题不属于 900 题库不计入；错题卷只计 j/s/m 题库题
+    const theoryKeys =
+      mode === "official"
+        ? []
+        : verdict.perQ
+            .filter((v) => answers[v.q.key]?.length && /^[jsm]\d+$/.test(v.q.key))
+            .map((v) => v.q.key);
     const wrong = verdict.perQ
       .filter((v) => !v.ok)
       .slice(0, 20)
       .map((v) => ({ id: v.q.key, type: v.q.type === "single" ? "单选" : v.q.type === "multi" ? "多选" : "判断", text: v.q.stem.slice(0, 40), count: 1 }));
-    useStore.getState().submitExam({ score: verdict.score, minutes, wrong, theoryKeys });
+    // 错题重练：答对的题交卷后移出错题本（未作答的保留）
+    const removeWrongKeys = mode === "wrong" ? verdict.perQ.filter((v) => v.ok).map((v) => v.q.key) : undefined;
+    useStore.getState().submitExam({ score: verdict.score, minutes, wrong, theoryKeys, removeWrongKeys });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -432,9 +525,16 @@ function ResultScreen({
         <Card className="flex items-center gap-4">
           <ScoreDonut value={verdict.score} unscored={false} />
           <div>
-            <div className="text-sm font-semibold text-ink1">{officialKey ? "官方卷得分" : "综合得分"}</div>
+            <div className="text-sm font-semibold text-ink1">
+              {mode === "official" ? "官方卷得分" : mode === "wrong" ? "错题重练得分" : "综合得分"}
+            </div>
             <div className="text-xs text-ink3 mt-1">
-              答对 {correct}/{paper.length} · {officialKey ? "官方答案判定" : `AI/导入答案判定（低置信 ${verdict.aiLow} 题）`}
+              答对 {correct}/{paper.length} ·{" "}
+              {mode === "official"
+                ? "官方答案判定"
+                : mode === "wrong"
+                  ? "官方/AI 参考答案混合判定 · 答对已移出错题本"
+                  : `AI/导入答案判定（低置信 ${verdict.aiLow} 题）`}
             </div>
           </div>
         </Card>
@@ -476,8 +576,8 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function totalSeconds(c: { j: number; s: number; m: number; official: boolean }) {
-  return c.official ? 90 * 60 : Math.round((c.j + c.s + c.m) * 90 * 60 / 190);
+function totalSeconds(c: { j: number; s: number; m: number; mode: Mode }) {
+  return c.mode === "official" ? 90 * 60 : Math.round((c.j + c.s + c.m) * 90 * 60 / 190);
 }
 
 function fmt(s: number) {

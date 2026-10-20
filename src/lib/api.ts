@@ -146,4 +146,6 @@ export type Store = {
   mastered: Record<string, boolean>; // 知识点掌握标记 {"k2-2":true}
   materialDir: string;
   materialDirCustom: boolean; // 用户显式指认过素材目录（启动默认迁移不再覆盖）
+  mockProfile: { ticket?: string; idTail?: string }; // 官方模拟平台登录信息（仅存本机，绝不进源码/云端）
+  practicalAnswers: Record<string, string>; // 实操简答草稿 {"2.2-0": "文本"}（qKey → 内容）
 };

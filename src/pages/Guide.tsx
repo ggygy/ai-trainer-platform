@@ -9,16 +9,20 @@ import {
   Lightbulb,
   Package,
   Stamp,
+  TerminalSquare,
   Wallet,
 } from "lucide-react";
 import { Card, CardHead, Badge, Btn, PageHead } from "../components/ui";
 import { GUIDE_LINKS, REG_CONDITIONS, REG_CHANNELS, SUBSIDIES, STUDY_TIPS } from "../data/content";
 import { openExternal } from "../lib/api";
+import { useStore } from "../lib/store";
 import type { PageId } from "../components/Sidebar";
 
 // 报考指南：报名条件/渠道/补贴 + 备考资源获取与导入指引。
 // 内容整理自社区攻略与官方公开通知，仅作参考——页头已标注「以官方最新通知为准」。
 export default function Guide({ go }: { go: (p: PageId) => void }) {
+  const mockProfile = useStore((s) => s.mockProfile);
+  const setMockProfile = useStore((s) => s.setMockProfile);
   return (
     <div className="flex flex-col gap-4 p-7 h-full overflow-y-auto">
       <PageHead
@@ -151,6 +155,32 @@ export default function Guide({ go }: { go: (p: PageId) => void }) {
               />
               <ResourceRow
                 icon={<ClipboardList size={15} className="text-accent shrink-0" />}
+                title="官方在线模拟平台（真实机考界面）"
+                lines={[
+                  "官方理论机考仿真平台：真实考试界面与操作流程，建议考前用它在浏览器里完整走一遍",
+                  "登录方式：职业工种选「人工智能训练师」，输入准考证号与身份证后 6 位（以准考证信息为准）",
+                  "下面两个输入框只是帮你在本机记住登录信息（仅保存在本电脑，方便随时复制），不填也能直接打开平台",
+                ]}
+                links={[{ label: "打开官方模拟平台", url: GUIDE_LINKS.mockPlatform }]}
+                action={
+                  <div className="flex gap-2.5">
+                    <input
+                      value={mockProfile?.ticket ?? ""}
+                      onChange={(e) => setMockProfile({ ticket: e.target.value })}
+                      placeholder="准考证号（仅存本机）"
+                      className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-surface2 border border-line text-xs text-ink1 outline-none focus:ring-1 focus:ring-accent"
+                    />
+                    <input
+                      value={mockProfile?.idTail ?? ""}
+                      onChange={(e) => setMockProfile({ idTail: e.target.value })}
+                      placeholder="身份证后 6 位（仅存本机）"
+                      className="flex-1 min-w-0 px-3 py-2 rounded-lg bg-surface2 border border-line text-xs text-ink1 outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
+                }
+              />
+              <ResourceRow
+                icon={<TerminalSquare size={15} className="text-accent shrink-0" />}
                 title="实操运行环境（Python + Jupyter）"
                 lines={[
                   "无需自装 Anaconda：环境助手一键安装 uv 托管的 Python 3.13 + JupyterLab + 全部依赖",

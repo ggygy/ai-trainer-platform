@@ -105,6 +105,8 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   const materialDir = useStore((s) => s.materialDir);
   const setMaterialDir = useStore((s) => s.setMaterialDir);
   const markPracticeDone = useStore((s) => s.markPracticeDone);
+  const practicalAnswers = useStore((s) => s.practicalAnswers);
+  const savePracticalAnswer = useStore((s) => s.savePracticalAnswer);
 
   // 导入素材包（网盘下载的 zip）；成功后 materialDir 更新 → 解析 effect 自动重跑
   const runImport = async () => {
@@ -152,6 +154,21 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   const qKey = `${group.id}-${sel.idx}`;
   const refText = practicalRef.answers[`${group.id}.${sel.idx + 1}`] ?? "";
   const [showRef, setShowRef] = useState(() => new URLSearchParams(window.location.search).get("ref") === "1");
+
+  // 简答草稿落库：切题先把旧题立即保存（防抖窗口内的输入不丢），再加载新题已存内容
+  const prevQKey = useRef(qKey);
+  useEffect(() => {
+    if (prevQKey.current !== qKey) {
+      savePracticalAnswer(prevQKey.current, answer);
+      prevQKey.current = qKey;
+      setAnswer(practicalAnswers[qKey] ?? "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qKey]);
+  useEffect(() => {
+    const t = setTimeout(() => savePracticalAnswer(qKey, answer), 600);
+    return () => clearTimeout(t);
+  }, [qKey, answer]);
 
   // 启动失败：后端看门狗 15s 内端口未通即判崩，回传 stderr 尾部
   const onStartFailed = (lines: string[]) => {

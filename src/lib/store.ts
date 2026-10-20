@@ -9,8 +9,8 @@ type WrongItem = Store["wrongBook"][number];
 type Actions = {
   /** 通用浅更新（仅限确无语义动作的简单场景） */
   update: (patch: Partial<Store> | ((s: Store) => Partial<Store>)) => void;
-  /** 交卷落库：历史 + 错题 + （非官方卷）刷题统计，一次写入 */
-  submitExam: (p: { score: number; minutes: number; wrong: WrongItem[]; theoryKeys: string[] }) => void;
+  /** 交卷落库：历史 + 错题 + （非官方卷）刷题统计，一次写入；removeWrongKeys=错题重练模式，答对的题移出错题本 */
+  submitExam: (p: { score: number; minutes: number; wrong: WrongItem[]; theoryKeys: string[]; removeWrongKeys?: string[] }) => void;
   /** 导入答案：全真卷连续编号拆节（√/×→判断 1-40，字母 41-180→单选-40，≥181→多选-180） */
   importAnswers: (parsed: Record<string, string>) => void;
   clearAnswers: () => void;
@@ -19,6 +19,8 @@ type Actions = {
   toggleMastered: (id: string) => void;
   markPracticeDone: (key: string) => void;
   setMaterialDir: (dir: string) => void;
+  setMockProfile: (p: Partial<Store["mockProfile"]>) => void;
+  savePracticalAnswer: (key: string, text: string) => void;
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -56,16 +58,28 @@ export const useStore = create<Store & Actions>()(
         ? "C:/Users/Public/Documents/人工智能训练师三级上网素材"
         : "/Users/zhouwangjun/Desktop/codeing/AI/人工智能训练师三级上网素材",
       materialDirCustom: false,
+      mockProfile: {},
+      practicalAnswers: {},
 
       update: (patch) => set(patch),
 
-      submitExam: ({ score, minutes, wrong, theoryKeys }) =>
+      submitExam: ({ score, minutes, wrong, theoryKeys, removeWrongKeys }) =>
         set((s) => {
           const theoryDone = { ...s.theoryDone };
           for (const k of theoryKeys) theoryDone[k] = today();
+          let wrongBook = [...s.wrongBook, ...wrong];
+          if (removeWrongKeys) {
+            // 错题重练交卷：答对（removeWrongKeys 只含答对的）移出错题本；
+            // 答错的原记录 count+1、不追加重复条目；未作答的原样保留
+            const wrongKeys = new Set(wrong.map((w) => w.id));
+            const remove = new Set(removeWrongKeys);
+            wrongBook = s.wrongBook
+              .filter((w) => !remove.has(w.id))
+              .map((w) => (wrongKeys.has(w.id) ? { ...w, count: w.count + 1 } : w));
+          }
           return {
             history: [...s.history, { date: today(), score, theory: null, practical: null, minutes }],
-            wrongBook: [...s.wrongBook, ...wrong],
+            wrongBook,
             theoryDone,
           };
         }),
@@ -106,6 +120,11 @@ export const useStore = create<Store & Actions>()(
         set((s) => ({ practice: { ...s.practice, [key]: { done: true, lastAt: today() } } })),
 
       setMaterialDir: (dir) => set({ materialDir: dir, materialDirCustom: true }),
+
+      setMockProfile: (p) => set((s) => ({ mockProfile: { ...s.mockProfile, ...p } })),
+
+      savePracticalAnswer: (key, text) =>
+        set((s) => ({ practicalAnswers: { ...s.practicalAnswers, [key]: text } })),
     }),
     {
       name: "atp.store.v1",

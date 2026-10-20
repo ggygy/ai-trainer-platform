@@ -100,15 +100,6 @@ export default function Sidebar({
           <span className="text-[11px] text-ink3 truncate">{envText}</span>
         </div>
       )}
-      <div className="flex items-center gap-2.5 px-1.5 py-1">
-        <div className="w-[30px] h-[30px] rounded-full bg-accent-soft flex items-center justify-center text-[12px] font-medium text-accent">
-          训
-        </div>
-        <div>
-          <div className="text-xs font-medium text-ink1">备考学员</div>
-          <div className="text-[10px] text-ink3">准考证 2609211301</div>
-        </div>
-      </div>
     </aside>
   );
 }

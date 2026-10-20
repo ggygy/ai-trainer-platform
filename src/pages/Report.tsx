@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { CircleCheck, TriangleAlert, Download } from "lucide-react";
+import { CircleCheck, TriangleAlert, Download, RotateCw } from "lucide-react";
 import { Card, Badge, Btn, Ghost, PageHead, Donut } from "../components/ui";
 import { QUESTION_GROUPS } from "../data/content";
 import { useStore } from "../lib/store";
-export default function Report({ onGo }: { onGo: (p: "exam") => void }) {
+export default function Report({ onGo, onWrongPractice }: { onGo: (p: "exam") => void; onWrongPractice: () => void }) {
   const store = useStore();
   const [expandAll, setExpandAll] = useState(false);
   const done = Object.values(store.practice).filter((p) => p.done).length;
@@ -110,8 +110,8 @@ export default function Report({ onGo }: { onGo: (p: "exam") => void }) {
             ))}
           </div>
           <div className="flex items-center justify-center gap-2.5 pt-3">
-            <Btn primary onClick={() => onGo("exam")} disabled={!store.wrongBook.length}>
-              <Download size={13} className="rotate-180" /> 重练全部错题
+            <Btn primary onClick={onWrongPractice} disabled={!store.wrongBook.length}>
+              <RotateCw size={13} /> 重练全部错题
             </Btn>
             {store.wrongBook.length > 8 && (
               <Ghost onClick={() => setExpandAll((v) => !v)}>{expandAll ? "收起" : `查看全部 ${store.wrongBook.length} 题`}</Ghost>

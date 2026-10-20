@@ -33,7 +33,11 @@ export default function App() {
   const [practicalInitial, setPracticalInitial] = useState<{ groupId: string; idx: number } | undefined>(initialPractical);
   const [updateOpen, setUpdateOpen] = useState(false);
   const [updateHandle, setUpdateHandle] = useState<UpdateHandle | null>(null);
-  const autoOfficial = new URLSearchParams(window.location.search).get("paper") === "official";
+  // ?paper=official|wrong 深链自动开卷；手动导航进考试页时清掉，避免再次进入自动重开
+  const [examAuto, setExamAuto] = useState<"official" | "wrong" | null>(() => {
+    const p = new URLSearchParams(window.location.search).get("paper");
+    return p === "official" || p === "wrong" ? p : null;
+  });
 
   const refreshEnv = () => {
     detectEnv()
@@ -70,6 +74,12 @@ export default function App() {
 
   const navigate = (p: PageId) => {
     setPage(p);
+    setExamAuto(null);
+  };
+
+  const openExamPaper = (paper: "official" | "wrong") => {
+    setExamAuto(paper);
+    setPage("exam");
   };
 
   const openPractical = (groupId: string, idx: number) => {
@@ -92,11 +102,11 @@ export default function App() {
         {page === "home" && <Dashboard go={navigate} env={envState} />}
         {page === "guide" && <Guide go={navigate} />}
         {page === "learn" && <TheoryLearn go={navigate} />}
-        {page === "exam" && <TheoryExam autoOfficial={autoOfficial} />}
+        {page === "exam" && <TheoryExam autoPaper={examAuto} />}
         {page === "practical" && <PracticalTrain openQ={openPractical} />}
         {page === "practical-exam" && <PracticalExam initial={practicalInitial} />}
         {page === "env" && <EnvAssistant onEnvChanged={refreshEnv} go={navigate} />}
-        {page === "report" && <Report onGo={navigate} />}
+        {page === "report" && <Report onGo={navigate} onWrongPractice={() => openExamPaper("wrong")} />}
       </main>
       <UpdateModal open={updateOpen} onClose={() => setUpdateOpen(false)} />
     </div>

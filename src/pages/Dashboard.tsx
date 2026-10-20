@@ -1,6 +1,7 @@
-import { Play, BookOpen, Timer, ArrowRight, CircleCheck, TriangleAlert, Info } from "lucide-react";
+import { Play, BookOpen, Timer, ArrowRight, CircleCheck, TriangleAlert, Info, ExternalLink } from "lucide-react";
 import { Card, CardHead, Badge, Btn, Ghost, PageHead } from "../components/ui";
-import { EXAM_INFO, QUESTION_GROUPS } from "../data/content";
+import { EXAM_INFO, GUIDE_LINKS, QUESTION_GROUPS } from "../data/content";
+import { openExternal } from "../lib/api";
 import { useStore } from "../lib/store";
 import type { PageId } from "../components/Sidebar";
 
@@ -58,7 +59,13 @@ export default function Dashboard({ go, env }: { go: (p: PageId) => void; env: {
     <div className="flex flex-col gap-5 p-7 h-full overflow-y-auto">
       <PageHead
         title="备考总览"
-        sub={daysToExam > 0 ? `距下次考试还有 ${daysToExam} 天 · 建议每天保持 2 小时练习` : "考试日已到，保持好状态"}
+        sub={
+          daysToExam > 0
+            ? `距下次考试还有 ${daysToExam} 天 · 建议每天保持 2 小时练习`
+            : daysToExam === 0
+              ? "今日考试，祝顺利"
+              : `考试（${EXAM_INFO.examDate}）已完成，祝取得好成绩`
+        }
         right={
           <>
             <Badge tone="muted">{EXAM_INFO.examDate} 考试</Badge>
@@ -167,6 +174,22 @@ export default function Dashboard({ go, env }: { go: (p: PageId) => void; env: {
                   <span className="text-xs font-medium text-ink1">{v}</span>
                 </div>
               ))}
+              <div className="border-t border-line pt-2.5 flex flex-col gap-1.5">
+                {[
+                  ["官方网站（交大）", "通知公告 · 资源下载", GUIDE_LINKS.sjtuSkill],
+                  ["在线模拟考试平台", "官方机考仿真 · 真实界面", GUIDE_LINKS.mockPlatform],
+                ].map(([label, sub, url]) => (
+                  <button
+                    key={label}
+                    onClick={() => openExternal(url)}
+                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 -mx-1 hover:bg-surface2 text-left"
+                  >
+                    <ExternalLink size={13} className="text-accent shrink-0" />
+                    <span className="text-xs font-medium text-ink1">{label}</span>
+                    <span className="text-[10px] text-ink3 truncate">{sub}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </Card>
 

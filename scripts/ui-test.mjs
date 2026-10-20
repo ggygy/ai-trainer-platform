@@ -2,6 +2,10 @@
 // 运行：node scripts/ui-test.mjs   （需 vite dev server 在 1420 端口）
 import { chromium } from "playwright-core";
 import assert from "node:assert";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
+const aiAnswers = require("../src/data/aiAnswers.json");
+const mock190 = require("../src/data/mock190.json");
 
 const EDGE = "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge";
 const BASE = "http://localhost:1420";
@@ -121,20 +125,32 @@ async function launchBrowser() {
     assert.ok(!page.url().includes("paper=official"), "返回首页应清除深链参数");
   });
 
-  // T5 实操：入口/参考答案/切题/标记完成
-  await step("T5 实操训练：开始练习→参考答案展开→切题→标记完成落库", async () => {
+  // T5 实操：入口/参考答案/切题/标记完成 + 简答草稿落库
+  await step("T5 实操训练：参考答案→简答草稿切题保留→标记完成落库", async () => {
     await nav("实操训练").click();
     await page.locator("button", { hasText: "开始练习" }).nth(3).click();
     await see("2.2.1");
     await page.getByRole("button", { name: /展开官方参考代码/ }).click();
     await see("2.2.1.ipynb");
     await page.getByRole("button", { name: /收起答案/ }).click();
+    // 简答草稿：输入 → 切题 → 切回，内容与 store 均应保留
+    await page.locator("textarea").fill("SMOTE 后少数类召回从 0.15 提升到 0.75");
+    await page.waitForTimeout(900); // 防抖 600ms 落库
     await page.locator("select").selectOption("2.2-2");
     await see("2.2.3");
+    await page.locator("select").selectOption("2.2-0");
+    await see("2.2.1");
+    assert.equal(
+      await page.locator("textarea").inputValue(),
+      "SMOTE 后少数类召回从 0.15 提升到 0.75",
+      "切题再切回，简答草稿应保留",
+    );
+    let s = await store();
+    assert.equal(s.practicalAnswers?.["2.2-0"], "SMOTE 后少数类召回从 0.15 提升到 0.75", "简答草稿应落库 practicalAnswers");
     await page.getByRole("button", { name: "标记完成", exact: true }).click();
     await page.waitForTimeout(300);
-    const s = await store();
-    assert.ok(s.practice?.["2.2-2"]?.done, "practice[2.2-2].done 应为 true");
+    s = await store();
+    assert.ok(s.practice?.["2.2-0"]?.done, "practice[2.2-0].done 应为 true（切回后标记当前题）");
   });
 
   // T6 环境助手：检测 + mock 安装 + mock Jupyter
@@ -179,6 +195,24 @@ async function launchBrowser() {
     // 第 4 题起继续轮换
     await page.getByRole("button", { name: "下一题" }).click();
     await see("例题 4/41");
+    // 上一题回看：作答状态应保留（第 3 题多选已提交，正确答案仍在）
+    await page.getByRole("button", { name: "上一题" }).click();
+    await see("例题 3/41");
+    await see("正确答案");
+    // 答题卡网格跳题：点格 1 回第 1 题
+    await page.locator("button[title^='单选']").first().click();
+    await see("例题 1/41");
+    await see("正确答案"); // 第 1 题已作答，状态保留
+    // 筛选：只刷未做
+    await page.getByRole("button", { name: /只刷未做/ }).click();
+    await see("例题");
+    // 「本题考点」弹层：打开→显示出处/讲义→Esc 关闭
+    await page.getByRole("button", { name: "查看本题考点" }).click();
+    await see("本题考点");
+    await see("3.1");
+    await page.keyboard.press("Escape");
+    await page.getByText("本题考点", { exact: true }).waitFor({ state: "hidden", timeout: 4000 });
+    await page.getByRole("button", { name: /^全部 41/ }).click(); // 切回全部
     s = await store();
     assert.ok(s.theoryDone?.["j153"], `判断作答应计入 theoryDone[j153]`);
     assert.ok(s.theoryDone?.["m70"], `多选作答应计入 theoryDone[m70]`);
@@ -187,19 +221,51 @@ async function launchBrowser() {
     assert.ok(wrongKeys.every((k) => /^[ojsm]{1,2}\d+$/.test(k)), `错题本键格式异常，实际 ${JSON.stringify(wrongKeys.slice(0, 8))}…`);
   });
 
-  // T8 成绩报告：导出下载 + 跳转按钮
-  await step("T8 成绩报告：导出报告下载 + 重练全部错题/去刷理论题跳转", async () => {
+  // T8 成绩报告：导出下载 + 错题重练闭环（答对移出/未答保留）
+  await step("T8 成绩报告：导出下载 + 重练错题闭环", async () => {
     await nav("成绩错题").click();
     await see("错题本");
     const dlP = page.waitForEvent("download", { timeout: 8000 });
     await page.getByRole("button", { name: /导出报告/ }).click();
     const dl = await dlP;
     assert.ok(dl.suggestedFilename().includes("备考报告"), "导出文件名应含 备考报告");
+    const before = (await store()).wrongBook?.length ?? 0;
+    assert.ok(before > 0, "前置错题应非空");
+    // 重练全部错题 → 自动开错题卷
     await page.getByRole("button", { name: /重练全部错题/ }).click();
-    await see("理论模拟考试");
-    await nav("成绩错题").click();
-    await page.getByText("去刷理论题").click();
-    await see("理论模拟考试");
+    await see("错题重练");
+    // 答对第一题（数据侧查答案：错题 key j/s/m+id → aiAnswers，oj/os/om+序号 → 官方卷）→ 交卷后该题应移出错题本
+    const wb0 = (await store()).wrongBook[0];
+    const mo = wb0.id.match(/^(o?)([jsm])(\d+)$/);
+    assert.ok(mo, `错题 key 格式异常：${wb0.id}`);
+    const qType = mo[2] === "j" ? "judge" : mo[2] === "s" ? "single" : "multi";
+    const answer = mo[1]
+      ? (qType === "judge" ? mock190.judge : qType === "single" ? mock190.single : mock190.multi).find(
+          (x) => x.n === parseInt(mo[3]),
+        )?.answer
+      : aiAnswers[qType][mo[3]]?.a;
+    assert.ok(answer, `未查到第一题答案：${wb0.id}`);
+    if (qType === "judge") {
+      await page.getByRole("button", { name: answer === "√" ? "正确 √" : "错误 ×" }).click();
+    } else {
+      for (const letter of answer.split("")) {
+        await page
+          .locator("div.bg-surface.border", { hasText: "标记疑问" })
+          .first()
+          .locator("button")
+          .filter({ hasText: new RegExp(`^${letter}\\b`) })
+          .first()
+          .click();
+      }
+    }
+    await page.getByRole("button", { name: "交卷" }).click();
+    await see("考试结束");
+    await page.waitForTimeout(300);
+    const s = await store();
+    const after = s.wrongBook?.length ?? 0;
+    assert.equal(after, before - 1, `第一题已答对（${wb0.id}=${answer}），应移出错题本：${before}→${after}`);
+    assert.ok(!s.wrongBook.some((w) => w.id === wb0.id), "答对的题不应残留在错题本");
+    assert.ok(s.wrongBook.every((w) => w.count >= 1), "其余未作答题应原样保留");
   });
 
   // T9 应用内更新入口：侧边栏入口可见，浏览器预览模式弹窗降级提示（桌面应用才会真正检查）
@@ -211,6 +277,23 @@ async function launchBrowser() {
     await see("浏览器预览模式不支持更新检查");
     await page.keyboard.press("Escape"); // 错误态允许 Esc 关闭
     await page.getByText("浏览器预览模式不支持更新检查").waitFor({ state: "hidden", timeout: 4000 });
+  });
+
+  // T10 官网链接入口：首页考试信息卡两入口 + 报考指南模拟平台行/本机凭据输入框
+  await step("T10 官网链接：首页两入口 + 指南页模拟平台行与输入框", async () => {
+    await see("官方网站（交大）");
+    await see("在线模拟考试平台");
+    await nav("报考指南").click();
+    await see("官方在线模拟平台");
+    await see("打开官方模拟平台");
+    const ticket = page.getByPlaceholder("准考证号（仅存本机）");
+    const idTail = page.getByPlaceholder("身份证后 6 位（仅存本机）");
+    await ticket.fill("2612345678");
+    await idTail.fill("ABC123");
+    await page.waitForTimeout(200);
+    const s = await store();
+    assert.equal(s.mockProfile?.ticket, "2612345678", "准考证号应仅存本机 store");
+    assert.equal(s.mockProfile?.idTail, "ABC123", "证件后 6 位应仅存本机 store");
   });
 
   await browser.close();

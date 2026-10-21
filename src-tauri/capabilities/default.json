@@ -6,6 +6,9 @@
   "permissions": [
     "core:default",
     "core:event:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
     "opener:default",
     "dialog:default",
     "updater:default",

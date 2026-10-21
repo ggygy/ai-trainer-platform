@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
   Timer,
   FileSpreadsheet,
@@ -10,6 +11,7 @@ import {
   FolderOpen,
   Maximize2,
   Minimize2,
+  AppWindow,
 } from "lucide-react";
 import { Card, CardHead, Badge, Btn, Ghost } from "../components/ui";
 import { practicalTasks, QUESTION_GROUPS, taskSteps, type PracticalTask } from "../data/content";
@@ -33,6 +35,10 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   // 资源加载,期间 iframe 一片黑(WebKit 透明底透出深色卡),用户会以为没启动(issue #7)
   const [jpLoaded, setJpLoaded] = useState(false);
   const [jpSlow, setJpSlow] = useState(false);
+  // macOS WKWebView 里跨源 http iframe 的加载在部分机器上被挂起(onLoad 永不触发,同 URL
+  // 系统浏览器正常,issue #7 用户实测)——内嵌 iframe 仅 Windows 用,macOS 走应用内子窗口
+  // (Tauri WebviewWindow 顶层加载,无跨源 iframe 的限制,实测渲染/cookie 均正常)。
+  const isMac = typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
   const folderRef = useRef<string | null>(null);
   folderRef.current = folder;
   const [seconds, setSeconds] = useState(120 * 60);
@@ -190,13 +196,52 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
     setLog((l) => [...l, "[错误] Jupyter 启动失败（进程已退出），日志尾部：", ...lines.map((x) => "  " + x)]);
   };
 
+  // macOS 专用:在应用内子窗口打开 Jupyter(顶层加载,绕开 WKWebView 跨源 iframe 的挂起)。
+  // 已开着 → 直接前置;重启过 Jupyter(端口变了)→ 关旧窗再开新地址。
+  const jupyterWinUrl = useRef("");
+  const openJupyterWindow = async (url: string) => {
+    if (!isTauri()) return;
+    try {
+      const existing = await WebviewWindow.getByLabel("jupyter");
+      if (existing) {
+        // 旧窗口地址与当前服务不一致(停止后重启换了随机端口)→ 重建
+        if (jupyterWinUrl.current !== url) {
+          await existing.close();
+        } else {
+          await existing.setFocus();
+          return;
+        }
+      }
+    } catch {
+      // 查询失败(窗口已销毁等)按不存在处理
+    }
+    try {
+      new WebviewWindow("jupyter", {
+        url,
+        title: "Jupyter Notebook",
+        width: 1320,
+        height: 880,
+        center: true,
+      });
+      jupyterWinUrl.current = url;
+      setLog((l) => [...l.slice(-400), "✓ 已在应用内窗口打开 Jupyter"]);
+    } catch (e) {
+      setLog((l) => [...l, `[错误] 打开 Jupyter 窗口失败: ${String(e)}`, `  服务地址仍可用系统浏览器打开: ${url}`]);
+    }
+  };
+
   const startJupyter = async () => {
     setStarting(true);
     const dir = materialDir; // 服务根 = 素材总目录；具体题的文件夹由 withTree 落位
     try {
       const info = await jupyterStart(dir);
-      if (info.running && info.url) setJp({ running: true, url: withTree(info.url, folderRef.current) });
-      unReady.current = await onJupyterReady((url) => setJp({ running: true, url: withTree(url, folderRef.current) }));
+      const onUp = (url: string) => {
+        const full = withTree(url, folderRef.current);
+        setJp({ running: true, url: full });
+        if (isMac) openJupyterWindow(full); // macOS:就绪即自动开应用内窗口
+      };
+      if (info.running && info.url) onUp(info.url);
+      unReady.current = await onJupyterReady(onUp);
       unFailed.current = await onJupyterFailed(onStartFailed);
       setLog((l) => [
         ...l,
@@ -374,13 +419,20 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
               jp.running ? (
                 <div className="flex gap-2.5">
                   <Ghost onClick={stopJp}>停止</Ghost>
+                  {isMac && (
+                    <Btn primary onClick={() => openJupyterWindow(withTree(jp.url, folderRef.current))}>
+                      <AppWindow size={13} /> 打开 Notebook 窗口
+                    </Btn>
+                  )}
                   <Btn onClick={() => openExternal(jp.url)}>
-                    <ExternalLink size={13} /> 独立窗口打开
+                    <ExternalLink size={13} /> 系统浏览器打开
                   </Btn>
-                  <Btn primary onClick={() => setFull((v) => !v)}>
-                    {full ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-                    {full ? "还原" : "放大"}
-                  </Btn>
+                  {!isMac && (
+                    <Btn primary onClick={() => setFull((v) => !v)}>
+                      {full ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                      {full ? "还原" : "放大"}
+                    </Btn>
+                  )}
                 </div>
               ) : (
                 <Btn primary onClick={startJupyter} disabled={starting}>
@@ -392,7 +444,26 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
           />
           <div className="flex-1 min-h-0 rounded-[10px] bg-inkwell overflow-hidden relative">
             {jp.running && jp.url ? (
-              isTauri() ? (
+              isTauri() && isMac ? (
+                // macOS:WKWebView 跨源 iframe 会挂起(见上注释),显示子窗口入口面板
+                <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-center px-6">
+                  <span className="w-12 h-12 rounded-xl bg-accent-soft flex items-center justify-center">
+                    <AppWindow size={24} className="text-accent" />
+                  </span>
+                  <div className="text-sm font-bold text-ink1">Jupyter 服务已启动</div>
+                  <div className="font-mono text-[11px] text-ink3 break-all max-w-[420px]">{jp.url}</div>
+                  <Btn primary onClick={() => openJupyterWindow(withTree(jp.url, folderRef.current))}>
+                    <AppWindow size={14} /> 打开 Notebook 窗口
+                  </Btn>
+                  <div className="text-[11px] text-ink3 leading-relaxed">
+                    在独立应用窗口中使用（推荐）。也可以{" "}
+                    <button className="text-accent hover:underline" onClick={() => openExternal(jp.url)}>
+                      用系统浏览器打开
+                    </button>
+                    ，两种方式做题效果相同。
+                  </div>
+                </div>
+              ) : isTauri() ? (
                 <div className="relative w-full h-full">
                   <iframe src={jp.url} className="w-full h-full border-0" title="jupyter" onLoad={() => setJpLoaded(true)} />
                   {!jpLoaded && (
@@ -462,6 +533,13 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
 
   async function stopJp() {
     await jupyterStop();
+    try {
+      // 服务停了子窗口就是死页面,顺手关掉
+      (await WebviewWindow.getByLabel("jupyter"))?.close();
+    } catch {
+      // 窗口不在就算了
+    }
+    jupyterWinUrl.current = "";
     setJp({ running: false, url: "" });
     setLog((l) => [...l, "$ jupyter 已停止"]);
   }

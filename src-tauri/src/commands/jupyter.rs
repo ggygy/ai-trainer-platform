@@ -97,8 +97,13 @@ fn resolve_launch() -> Option<JupyterLaunch> {
 
 /// 允许被 Tauri WebView（异源）内嵌所需的参数：
 /// ① CSP frame-ancestors：jupyter 4.x 默认 'self'，iframe 会被浏览器静默拦截；
-/// ② SameSite=None(+Secure)：跨站 iframe 里 Lax cookie 一律不收不发——实测 Chromium 下
+/// ② SameSite=None：跨站 iframe 里 Lax cookie 一律不收不发——实测 Chromium 下
 ///    连 `?token=` 自动登录都会被拦（会话 cookie 种不上，永远弹登录墙）；
+///    cookie 的 Secure 属性分平台：Windows WebView2 对 http://127.0.0.1 按
+///    secure-context 豁免，Secure cookie 正常收发（且 Chromium 要求 SameSite=None
+///    必须带 Secure 才接受）；**macOS WKWebView 拒收 http 下发的 Secure cookie**
+///    （实测 set-Cookie 带 Secure 时 _xsrf 根本种不进 WKHTTPCookieStore → Lab
+///    前端写操作全 403），故 macOS 不加 secure（WebKit 不强制 None+Secure 配对）；
 /// ③ allow_origin='*'(+credentials)：内核通道走 WebSocket，跨站 iframe 的 WS 握手带
 ///    Origin: tauri.localhost，默认仅同源 → 403；
 /// ④ page_config_data.appendToken：kernel 通道 WS 无法带 Authorization header，浏览器
@@ -112,10 +117,14 @@ fn resolve_launch() -> Option<JupyterLaunch> {
 /// 注意 tornado_settings 的值必须是 **Python 字面量**（True 大写）：traitlets 用
 /// literal_eval 解析 dict 参数，JSON 的 `true` 会报 "expected a dict, not the list"。
 fn embed_args(lab_major: u32) -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    let cookie = "{'samesite':'None'}";
+    #[cfg(not(target_os = "macos"))]
+    let cookie = "{'samesite':'None','secure':True}";
     let settings = if lab_major >= 4 {
-        "{'headers':{'Content-Security-Policy':'frame-ancestors *'},'cookie_options':{'samesite':'None','secure':True},'xsrf_cookie_kwargs':{'samesite':'None','secure':True},'page_config_data':{'appendToken':'true'}}"
+        format!("{{'headers':{{'Content-Security-Policy':'frame-ancestors *'}},'cookie_options':{cookie},'xsrf_cookie_kwargs':{cookie},'page_config_data':{{'appendToken':'true'}}}}")
     } else {
-        "{'headers':{'Content-Security-Policy':'frame-ancestors *'},'page_config_data':{'appendToken':'true'}}"
+        "{'headers':{'Content-Security-Policy':'frame-ancestors *'},'page_config_data':{'appendToken':'true'}}".to_string()
     };
     vec![
         format!("--ServerApp.tornado_settings={settings}"),

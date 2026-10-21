@@ -17,7 +17,7 @@ import { practicalRef } from "../lib/answers";
 import { useStore } from "../lib/store";
 import { open as pickDirectory } from "@tauri-apps/plugin-dialog";
 import { pickAndImportMaterials } from "../lib/materials";
-import { jupyterStart, jupyterStop, onJupyterFailed, onJupyterLog, onJupyterReady, jupyterStatus, isTauri, openFolder, pathIsDir, dirEntryCount } from "../lib/api";
+import { jupyterStart, jupyterStop, onJupyterFailed, onJupyterLog, onJupyterReady, jupyterStatus, isTauri, openFolder, openExternal, pathIsDir, dirEntryCount } from "../lib/api";
 
 export default function PracticalExam({ initial }: { initial?: { groupId: string; idx: number } }) {
   const [sel, setSel] = useState(initial ?? { groupId: "2.2", idx: 0 });
@@ -29,6 +29,10 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
   const [full, setFull] = useState(false); // Notebook 区域铺满整个窗口
   const [folder, setFolder] = useState<string | null>(null); // 当前题实际存在的素材文件夹（null=落根目录）
   const [importing, setImporting] = useState(false);
+  // iframe 加载反馈:jupyter-ready(端口通)到 JupyterLab 界面真正渲完之间还有数秒到十几秒的
+  // 资源加载,期间 iframe 一片黑(WebKit 透明底透出深色卡),用户会以为没启动(issue #7)
+  const [jpLoaded, setJpLoaded] = useState(false);
+  const [jpSlow, setJpSlow] = useState(false);
   const folderRef = useRef<string | null>(null);
   folderRef.current = folder;
   const [seconds, setSeconds] = useState(120 * 60);
@@ -91,6 +95,15 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
     }, 5000);
     return () => clearInterval(t);
   }, [jp.running]);
+
+  // iframe src 变化(启动/切题跟随)即重新进入「加载中」;8s 仍未 onLoad 提示可用浏览器打开
+  useEffect(() => {
+    if (!jp.url) return;
+    setJpLoaded(false);
+    setJpSlow(false);
+    const t = setTimeout(() => setJpSlow(true), 8000);
+    return () => clearTimeout(t);
+  }, [jp.url]);
 
   // 响应题组页跳转
   useEffect(() => {
@@ -361,7 +374,7 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
               jp.running ? (
                 <div className="flex gap-2.5">
                   <Ghost onClick={stopJp}>停止</Ghost>
-                  <Btn onClick={() => window.open(jp.url, "_blank")}>
+                  <Btn onClick={() => openExternal(jp.url)}>
                     <ExternalLink size={13} /> 独立窗口打开
                   </Btn>
                   <Btn primary onClick={() => setFull((v) => !v)}>
@@ -380,7 +393,27 @@ export default function PracticalExam({ initial }: { initial?: { groupId: string
           <div className="flex-1 min-h-0 rounded-[10px] bg-inkwell overflow-hidden relative">
             {jp.running && jp.url ? (
               isTauri() ? (
-                <iframe src={jp.url} className="w-full h-full border-0" title="jupyter" />
+                <div className="relative w-full h-full">
+                  <iframe src={jp.url} className="w-full h-full border-0" title="jupyter" onLoad={() => setJpLoaded(true)} />
+                  {!jpLoaded && (
+                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2.5 text-center px-6">
+                      <LoaderCircle size={22} className="text-blue-300 animate-spin" />
+                      <div className="text-[12px] text-slate-300 leading-relaxed">
+                        正在加载 JupyterLab 界面…（服务已启动，冷启动需 10~20 秒，请勿重复点击）
+                      </div>
+                      {jpSlow && (
+                        <>
+                          <div className="text-[11px] text-slate-500 leading-relaxed">
+                            等待较久？可在系统浏览器中打开同一服务（做题效果相同）：
+                          </div>
+                          <Btn onClick={() => openExternal(jp.url)}>
+                            <ExternalLink size={13} /> 在系统浏览器打开
+                          </Btn>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div className="w-full h-full p-4 flex flex-col items-center justify-center gap-2 text-center">
                   <LoaderCircle size={18} className="text-blue-300" />

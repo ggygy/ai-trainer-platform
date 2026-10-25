@@ -1,12 +1,13 @@
 # 每次推送到 main：快照构建（预发布 tag vX.Y.Z-日期-sha）；release.yml 触发时为正式发布
-# （tag 形如 v0.2.0，Release 标记 latest 非预发布）。产物：dmg（arm64，配置了 APPLE_* Secrets
-# 时自动 Developer ID 签名+公证）+ NSIS exe（x64）+ 应用内更新产物（macOS .app.tar.gz+sig /
-# Windows setup.exe+sig）+ latest.json 更新清单，下载见 Releases 页 assets。
+# （tag 形如 v0.2.0，Release 标记 latest 非预发布）。产物：dmg ×2（macOS arm64 + Intel x64，
+# 配置了 APPLE_* Secrets 时自动 Developer ID 签名+公证）+ NSIS exe（Windows x64）+ 应用内
+# 更新产物（macOS .app.tar.gz+sig ×2 架构 / Windows setup.exe+sig）+ latest.json 更新清单
+# + checksums.txt 全平台校验清单，下载见 Releases 页 assets。
 # 更新清单用 TAURI_SIGNING_PRIVATE_KEY 对产物做 minisign 签名，公钥在 tauri.conf 的
 # plugins.updater.pubkey；latest.json 由 publish job 生成——releases/latest/download/latest.json
 # 只会命中非预发布 Release，快照上的清单不会推给用户。
 #
-# 发布集中在末尾的 publish job：两个平台都构建成功、产物经由 artifacts 汇合后才创建 Release。
+# 发布集中在末尾的 publish job：所有平台都构建成功、产物经由 artifacts 汇合后才创建 Release。
 # 早期版本由各平台 job 各自创建/上传 Release，中途被取消（如同并发组内新 push 抢占）会留下
 # 「只有 dmg 没有 exe」的半成品 Release——这正是「Windows 包不见了」观感的来源。
 name: 构建发布
@@ -31,10 +32,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # macOS 双架构：同一台 arm64 runner 上原生编 aarch64、交叉编 Intel x64
+  # （rustup 装好目标后，Apple 平台间 rustc/clang 交叉编译开箱即用）。
+  # 指定 --target 后产物路径变为 src-tauri/target/<triple>/release/bundle/，两架构互不覆盖。
   build-macos:
     runs-on: macos-latest
+    strategy:
+      # 一条腿失败时另一条继续跑完（便于同时看到两条腿的报错；publish 仍要求两条腿都成功）
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            arch: aarch64
+          - target: x86_64-apple-darwin
+            arch: x64
     outputs:
-      # publish 据此决定 Release 说明里的 Gatekeeper 文案
+      # publish 据此决定 Release 说明里的 Gatekeeper 文案（两条腿写入相同值，取哪条都一样）
       signed: ${{ steps.sign_flag.outputs.signed }}
     env:
       # 是否配置了签名 Secrets（控制签名校验步骤与 Release 说明文案）
@@ -48,10 +61,14 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # 缓存按目标三元组隔离，避免两架构的 target/ 产物互相覆盖污染
+          key: ${{ matrix.target }}
 
       - name: 安装前端依赖
         run: npm ci
@@ -61,7 +78,7 @@ jobs:
       # 因此未配置 Secrets 时绝不能注入空变量（否则 security import 空证书直接失败）
       - name: 构建 Tauri 应用（签名+公证）
         if: env.SIGNED == 'true'
-        run: npm run tauri build
+        run: npm run tauri build -- --target ${{ matrix.target }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -73,7 +90,7 @@ jobs:
 
       - name: 构建 Tauri 应用
         if: env.SIGNED != 'true'
-        run: npm run tauri build
+        run: npm run tauri build -- --target ${{ matrix.target }}
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
@@ -82,7 +99,7 @@ jobs:
         run: |
           # tauri-bundler 打完 dmg 会删除 bundle/macos/ 下的 .app（日志 "Cleaning ..."），
           # 所以只能挂载 dmg 校验里面的 app——这正是用户拿到手的真实状态
-          DMG=$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -1)
+          DMG=$(ls src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg | head -1)
           echo "== 校验 dmg 签名: $DMG"
           codesign --verify --strict "$DMG"
           MNT="$(mktemp -d)/dmg"
@@ -100,11 +117,11 @@ jobs:
         run: |
           mkdir -p release
           VER=$(node -p "require('./package.json').version")
-          cp src-tauri/target/release/bundle/dmg/*.dmg "release/ai-trainer-platform_${VER}_aarch64.dmg"
+          BUNDLE=src-tauri/target/${{ matrix.target }}/release/bundle
+          cp "$BUNDLE"/dmg/*.dmg "release/ai-trainer-platform_${VER}_${{ matrix.arch }}.dmg"
           # 应用内更新产物（updater 下载的就是这个 tar.gz，sig 内嵌进 latest.json）
-          cp src-tauri/target/release/bundle/macos/*.app.tar.gz "release/ai-trainer-platform_${VER}_aarch64.app.tar.gz"
-          cp src-tauri/target/release/bundle/macos/*.app.tar.gz.sig "release/ai-trainer-platform_${VER}_aarch64.app.tar.gz.sig"
-          shasum -a 256 release/*.dmg release/*.app.tar.gz > release/checksums-mac.txt
+          cp "$BUNDLE"/macos/*.app.tar.gz "release/ai-trainer-platform_${VER}_${{ matrix.arch }}.app.tar.gz"
+          cp "$BUNDLE"/macos/*.app.tar.gz.sig "release/ai-trainer-platform_${VER}_${{ matrix.arch }}.app.tar.gz.sig"
 
       - name: 记录签名状态
         id: sign_flag
@@ -112,7 +129,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: mac-dist
+          name: mac-dist-${{ matrix.arch }}
           path: release/
           retention-days: 3
 
@@ -150,7 +167,6 @@ jobs:
           cp src-tauri/target/release/bundle/nsis/*-setup.exe "release/ai-trainer-platform_${VER}_x64-setup.exe"
           # Windows 的更新产物就是 setup.exe 本体，sig 内嵌进 latest.json
           cp src-tauri/target/release/bundle/nsis/*-setup.exe.sig "release/ai-trainer-platform_${VER}_x64-setup.exe.sig"
-          sha256sum release/*.exe > release/checksums-win.txt
 
       - uses: actions/upload-artifact@v4
         with:
@@ -178,7 +194,12 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: mac-dist
+          name: mac-dist-aarch64
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-dist-x64
           path: dist
 
       - uses: actions/download-artifact@v4
@@ -195,12 +216,17 @@ jobs:
             echo "tag=v$(node -p "require('./package.json').version")-$(date +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
 
+      # 在此统一生成全平台校验清单（双架构 mac 产物若各自生成会在 download 时同名冲突）
+      - name: 生成全平台校验清单 checksums.txt
+        run: cd dist && sha256sum *.dmg *.exe *.app.tar.gz > checksums.txt
+
       - name: 生成应用内更新清单 latest.json
         env:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           VER=$(node -p "require('./package.json').version")
-          MAC_SIG=$(cat "dist/ai-trainer-platform_${VER}_aarch64.app.tar.gz.sig")
+          MAC_ARM_SIG=$(cat "dist/ai-trainer-platform_${VER}_aarch64.app.tar.gz.sig")
+          MAC_X64_SIG=$(cat "dist/ai-trainer-platform_${VER}_x64.app.tar.gz.sig")
           WIN_SIG=$(cat "dist/ai-trainer-platform_${VER}_x64-setup.exe.sig")
           # 更新说明 = 上个正式 tag 以来的提交（排除发版 bump），用户在应用内更新弹窗里看到
           PREV=$(git tag --list | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vx "$TAG" | sort -rV | head -1 || true)
@@ -213,19 +239,20 @@ jobs:
           echo "== 更新说明（$PREV → $TAG）"; echo "$NOTES"
           node -e '
             const fs = require("fs");
-            const [ver, tag, macSig, winSig, notes] = process.argv.slice(1);
+            const [ver, tag, macArmSig, macX64Sig, winSig, notes] = process.argv.slice(1);
             const base = `https://github.com/ggygy/ai-trainer-platform/releases/download/${tag}`;
             fs.writeFileSync("dist/latest.json", JSON.stringify({
               version: ver,
               notes,
               pub_date: new Date().toISOString(),
               platforms: {
-                "darwin-aarch64": { signature: macSig, url: `${base}/ai-trainer-platform_${ver}_aarch64.app.tar.gz` },
+                "darwin-aarch64": { signature: macArmSig, url: `${base}/ai-trainer-platform_${ver}_aarch64.app.tar.gz` },
+                "darwin-x86_64": { signature: macX64Sig, url: `${base}/ai-trainer-platform_${ver}_x64.app.tar.gz` },
                 "windows-x86_64": { signature: winSig, url: `${base}/ai-trainer-platform_${ver}_x64-setup.exe` },
               },
             }, null, 2) + "\n");
             console.log("latest.json 已生成");
-          ' "$VER" "$TAG" "$MAC_SIG" "$WIN_SIG" "$NOTES"
+          ' "$VER" "$TAG" "$MAC_ARM_SIG" "$MAC_X64_SIG" "$WIN_SIG" "$NOTES"
 
       - name: 创建 Release 并上传全部产物
         env:
@@ -239,6 +266,7 @@ jobs:
             echo "$COMMIT_MSG"
             echo
             echo "---"
+            echo "- macOS 分架构下载：Apple Silicon（M 系列）用 \`_aarch64.dmg\`，Intel 芯片用 \`_x64.dmg\`（终端 \`uname -m\`：arm64 → aarch64，x86_64 → x64）"
             if [ "$SIGNED" = "true" ]; then
               echo "- macOS 包已签名并公证（Developer ID），下载后可直接打开；首次启动仍弹「已下载」提示时，右键 → 打开一次即可"
             else
@@ -246,7 +274,7 @@ jobs:
               echo "  \`xattr -cr \"/Applications/AI Trainer Prep.app\"\`（新版 macOS 上「右键 → 打开」已无效）"
             fi
             echo "- Windows 安装：未做代码签名，SmartScreen 弹出时点「更多信息 → 仍要运行」"
-            echo "- 完整性：\`shasum -a 256 -c checksums-mac.txt\` / \`sha256sum -c checksums-win.txt\`"
+            echo "- 完整性校验：\`shasum -a 256 -c checksums.txt\`（macOS）/ \`sha256sum -c checksums.txt\`（Windows git-bash），清单覆盖全部架构的 dmg/exe/更新包"
             echo "- 应用内更新：侧边栏底部「检查更新」可自动下载并安装新版本（v0.4.0 起支持，旧版需手动装本页安装包）"
             echo "- 实操题素材包（约 220MB）不含在安装包内：从网盘下载 zip 后在「环境助手 → 实操素材包」导入"
             echo "- 判分/统计数据本机 localStorage 存储，覆盖安装不丢数据"

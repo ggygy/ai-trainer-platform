@@ -21,6 +21,7 @@
 | [0015](0015-materials-distribution.md) | 实操素材包分发：网盘 + 应用内导入 | 已接受 | 2026-10-11 |
 | [0016](0016-in-app-updater.md) | 应用内更新：tauri-plugin-updater + GitHub Releases 自更新 | 已接受 | 2026-10-13 |
 | [0017](0017-jupyter-ws-append-token.md) | 内嵌 Jupyter 内核 WS 认证改 URL token（appendToken），绕开三方 cookie 拦截 | 已接受 | 2026-10-20 |
+| [0018](0018-macos-dual-arch-build.md) | macOS 双架构构建：同机交叉编译 Intel x64 dmg，updater/校验清单配套 | 已接受 | 2026-10-26 |
 
 ## 新增 ADR 的约定
 

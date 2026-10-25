@@ -137,9 +137,19 @@ function mockEnv(): ToolInfo[] {
 }
 
 // —— 本地持久化状态的数据模型（读写与存储见 lib/store.ts，zustand persist） ——
+export type ExamMode = "normal" | "official" | "wrong";
+/** 一场理论考试的逐题数据：只存 key 与作答，题面/答案回看时按 key 从题库现场还原（lib/questions.ts） */
+export type ExamDetail = {
+  mode: ExamMode;
+  keys: string[]; // 试卷顺序
+  answers: Record<string, string[]>; // 仅含作答过的题
+  marked?: string[];
+  correct: number;
+  total: number;
+};
 export type Store = {
   practice: Record<string, { done: boolean; wrong?: boolean; lastAt: string }>;
-  history: { date: string; score: number | null; theory: number | null; practical: number | null; minutes: number }[];
+  history: { date: string; score: number | null; theory: number | null; practical: number | null; minutes: number; detail?: ExamDetail }[];
   wrongBook: { id: string; type: string; text: string; count: number }[];
   answerKey: { judge?: Record<string, string>; single?: Record<string, string>; multi?: Record<string, string> }; // 全真卷连续编号拆节存放（judge/single/multi 各按题型题号）
   theoryDone: Record<string, string>; // 已作答理论题 {"s5":"2026-10-09"}（key=j/s/m+题号，官方卷不计入）

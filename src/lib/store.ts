@@ -2,15 +2,18 @@
 // 所有写路径必须走 action，禁止组件直接读写 localStorage（StrictMode 双跑防护仍在页面层，如 savedRef）
 import { create } from "zustand";
 import { persist, type PersistStorage } from "zustand/middleware";
-import type { Store } from "./api";
+import type { ExamDetail, Store } from "./api";
 
 type WrongItem = Store["wrongBook"][number];
+
+/** 逐题回顾数据只保留最近 N 场（每场官方卷约 5KB，防 localStorage 无限增长）；更早的场次只留分数 */
+const DETAIL_KEEP = 30;
 
 type Actions = {
   /** 通用浅更新（仅限确无语义动作的简单场景） */
   update: (patch: Partial<Store> | ((s: Store) => Partial<Store>)) => void;
   /** 交卷落库：历史 + 错题 + （非官方卷）刷题统计，一次写入；removeWrongKeys=错题重练模式，答对的题移出错题本 */
-  submitExam: (p: { score: number; minutes: number; wrong: WrongItem[]; theoryKeys: string[]; removeWrongKeys?: string[] }) => void;
+  submitExam: (p: { score: number; minutes: number; wrong: WrongItem[]; theoryKeys: string[]; removeWrongKeys?: string[]; detail?: ExamDetail }) => void;
   /** 导入答案：全真卷连续编号拆节（√/×→判断 1-40，字母 41-180→单选-40，≥181→多选-180） */
   importAnswers: (parsed: Record<string, string>) => void;
   clearAnswers: () => void;
@@ -63,7 +66,7 @@ export const useStore = create<Store & Actions>()(
 
       update: (patch) => set(patch),
 
-      submitExam: ({ score, minutes, wrong, theoryKeys, removeWrongKeys }) =>
+      submitExam: ({ score, minutes, wrong, theoryKeys, removeWrongKeys, detail }) =>
         set((s) => {
           const theoryDone = { ...s.theoryDone };
           for (const k of theoryKeys) theoryDone[k] = today();
@@ -77,11 +80,10 @@ export const useStore = create<Store & Actions>()(
               .filter((w) => !remove.has(w.id))
               .map((w) => (wrongKeys.has(w.id) ? { ...w, count: w.count + 1 } : w));
           }
-          return {
-            history: [...s.history, { date: today(), score, theory: null, practical: null, minutes }],
-            wrongBook,
-            theoryDone,
-          };
+          const history = [...s.history, { date: today(), score, theory: null, practical: null, minutes, detail }];
+          const cut = history.length - DETAIL_KEEP;
+          for (let i = 0; i < cut; i++) if (history[i].detail) history[i] = { ...history[i], detail: undefined };
+          return { history, wrongBook, theoryDone };
         }),
 
       importAnswers: (parsed) =>

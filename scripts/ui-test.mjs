@@ -96,29 +96,54 @@ async function launchBrowser() {
     await page.getByRole("button", { name: "交卷" }).click();
     await see("考试结束");
     await see("综合得分");
+    // 答题回顾：45 题全部未作答 → 筛选 chip「未答 45」，逐题块与答题卡都应渲染
+    await see("答题回顾");
+    await see("未答 45");
+    assert.equal(await page.locator('[id^="rv-"]').count(), 45, "答题回顾应逐题渲染 45 道");
     await page.waitForTimeout(300);
     const s = await store();
     assert.equal(s.history?.length, 1, `history 应为 1 条（StrictMode 重复写入?），实际 ${s.history?.length}`);
     assert.equal(s.wrongBook?.length, 20, `错题应收录 20 条，实际 ${s.wrongBook?.length}`);
     assert.equal(Object.keys(s.theoryDone ?? {}).length, 0, "未作答的快速刷题不应计入 theoryDone");
+    const d = s.history[0].detail;
+    assert.ok(d && d.mode === "normal" && d.total === 45 && d.keys.length === 45, `history.detail 应落库 45 题逐题数据，实际 ${JSON.stringify(d && { mode: d.mode, total: d.total, keys: d.keys.length })}`);
+    assert.equal(Object.keys(d.answers).length, 0, "未作答时 detail.answers 应为空");
     await page.getByRole("button", { name: "返回首页" }).click();
     await see("备考总览");
   });
 
-  // T4 官方全真卷深链 + 答题 + 判分 + 返回首页不复发考试
-  await step("T4 官方全真卷：深链自动开考→答题→官方判分→返回首页", async () => {
+  // T4 官方全真卷深链 + 答题 + 判分 + 答题回顾筛选 + 返回首页不复发考试
+  await step("T4 官方全真卷：深链自动开考→答题→官方判分→答题回顾→返回首页", async () => {
     await page.goto(BASE + "/?page=exam&paper=official", { waitUntil: "networkidle" });
     await see("第 1 / 190 题");
     await see("官方全真卷");
-    await page.getByRole("button", { name: "错误 ×" }).click(); // 官方卷第 1 判断题答案为 ×
+    await page.getByRole("button", { name: "错误 ×" }).click(); // 第 1 判断题官方答案为 √，此处故意答错以产生一道错题
     await page.getByRole("button", { name: "41", exact: true }).click(); // 答题卡跳到单选第 1 题
     await see("在浏览器中，要打开一个新的标签页");
-    await page.getByRole("button", { name: /Ctrl \+ T/ }).click();
+    await page.getByRole("button", { name: /Ctrl \+ T/ }).click(); // 单选第 1 题官方答案 A = Ctrl + T
     await page.getByRole("button", { name: "交卷" }).click();
     await see("考试结束");
     await see("官方答案判定");
     const s = await store();
     assert.equal(s.history?.length, 2, `官方卷应记 1 次历史，实际累计 ${s.history?.length}`);
+    // 逐题数据按数据侧校验：作答 2 题，答对数 = 两题与官方答案比对的结果
+    const d = s.history[1].detail;
+    assert.ok(d && d.mode === "official" && d.total === 190 && d.keys.length === 190, "官方卷 detail 应为 190 题");
+    assert.deepEqual(d.answers, { oj1: ["×"], os1: ["A"] }, `detail.answers 应只含作答的 2 题，实际 ${JSON.stringify(d.answers)}`);
+    const expectCorrect =
+      (mock190.judge.find((x) => x.n === 1).answer === "×" ? 1 : 0) + (mock190.single.find((x) => x.n === 1).answer === "A" ? 1 : 0);
+    assert.equal(d.correct, expectCorrect, `答对数应与官方答案比对一致：期望 ${expectCorrect}，实际 ${d.correct}`);
+    // 答题回顾筛选：「答错 N」只显示答错的题，且逐题块展示正确答案与来源
+    await see("答题回顾");
+    const wrongN = 2 - expectCorrect;
+    await page.getByRole("button", { name: `答错 ${wrongN}`, exact: true }).click();
+    assert.equal(await page.locator('[id^="rv-"]').count(), wrongN, `筛选「答错」后应只显示 ${wrongN} 题`);
+    if (wrongN > 0) {
+      await see("正确答案");
+      await see("官方答案");
+    }
+    await page.getByRole("button", { name: "全部 190", exact: true }).click();
+    assert.equal(await page.locator('[id^="rv-"]').count(), 190, "切回「全部」应显示 190 题");
     await page.getByRole("button", { name: "返回首页" }).click();
     await page.waitForTimeout(400);
     await see("备考总览");
@@ -221,10 +246,26 @@ async function launchBrowser() {
     assert.ok(wrongKeys.every((k) => /^[ojsm]{1,2}\d+$/.test(k)), `错题本键格式异常，实际 ${JSON.stringify(wrongKeys.slice(0, 8))}…`);
   });
 
-  // T8 成绩报告：导出下载 + 错题重练闭环（答对移出/未答保留）
-  await step("T8 成绩报告：导出下载 + 重练错题闭环", async () => {
+  // T8 成绩报告：历史场次回看 + 错题本展开看答案 + 导出下载 + 错题重练闭环（答对移出/未答保留）
+  await step("T8 成绩报告：场次回看 + 错题展开答案 + 导出 + 重练闭环", async () => {
     await nav("成绩错题").click();
     await see("错题本");
+    // 模拟考记录：最近一场（T4 官方卷）可回看，弹层内复用答题回顾
+    await see("模拟考记录");
+    await page.getByRole("button", { name: "查看回顾" }).first().click();
+    await see("答题回顾");
+    await see("官方全真卷");
+    assert.equal(await page.locator('[id^="rv-"]').count(), 190, "官方卷回看应还原 190 题");
+    await page.getByRole("button", { name: /关闭/ }).click();
+    await page.waitForTimeout(200);
+    assert.equal(await page.locator('[id^="rv-"]').count(), 0, "关闭弹层后逐题块应消失");
+    // 错题本：点一条展开 → 完整题干 + 正确答案（之前只能重做看不到答案）
+    await page.getByRole("button", { name: /错 \d+ 次/ }).first().click();
+    await see("正确答案");
+    assert.equal(await page.locator('[id^="rv-"]').count(), 1, "展开一条错题应渲染一个题目详情块");
+    await page.getByRole("button", { name: /错 \d+ 次/ }).first().click(); // 再点收起
+    await page.waitForTimeout(150);
+    assert.equal(await page.locator('[id^="rv-"]').count(), 0, "收起后详情块应消失");
     const dlP = page.waitForEvent("download", { timeout: 8000 });
     await page.getByRole("button", { name: /导出报告/ }).click();
     const dl = await dlP;

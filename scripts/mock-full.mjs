@@ -109,24 +109,33 @@ async function launchBrowser() {
     await see("已答 190/190");
   });
 
-  // S4 交卷 → 官方加权判分（40×0.5 + 140×0.5 + 10×1 = 100）
-  await step("S4 交卷判分：官方卷得分 100 · 答对 190/190", async () => {
+  // S4 交卷 → 官方加权判分（40×0.5 + 140×0.5 + 10×1 = 100）；答题回顾应全绿
+  await step("S4 交卷判分：官方卷得分 100 · 答对 190/190 · 回顾答错 0", async () => {
     await page.getByRole("button", { name: "交卷" }).click();
     await see("考试结束");
     await see("官方卷得分");
     await see("答对 190/190");
     await see("官方答案判定");
     await see("190/190"); // 作答完成 Stat
+    await see("答题回顾");
+    await see("答错 0");
+    await see("未答 0");
   });
 
-  // S5 落库验证：历史恰好 1 条（StrictMode 不重复）、得分 100、错题本 0、导入答案仍在
-  await step("S5 落库：历史 1 条得分 100 · 错题本 0 · answerKey 190 条", async () => {
+  // S5 落库验证：历史恰好 1 条（StrictMode 不重复）、得分 100、错题本 0、导入答案仍在、逐题 detail 全对
+  await step("S5 落库：历史 1 条得分 100 · 错题本 0 · answerKey 190 条 · detail 190/190", async () => {
     await page.waitForTimeout(300);
     const s = await store();
     assert.equal(s.history?.length, 1, `历史应恰好 1 条，实际 ${s.history?.length}`);
     assert.equal(s.history?.[0]?.score, 100, `成绩应为 100，实际 ${s.history?.[0]?.score}`);
     assert.equal(s.wrongBook?.length, 0, `全对应无错题，实际 ${s.wrongBook?.length}`);
     assert.equal(Object.keys(s.theoryDone ?? {}).length, 0, "官方卷不应计入 theoryDone（非 900 题库）");
+    const d = s.history[0].detail;
+    assert.ok(
+      d && d.mode === "official" && d.correct === 190 && d.total === 190,
+      `detail 应为官方卷 190/190，实际 ${JSON.stringify(d && { mode: d.mode, correct: d.correct, total: d.total })}`,
+    );
+    assert.equal(Object.keys(d.answers).length, 190, "detail.answers 应含全部 190 题作答");
     const keyCount =
       Object.keys(s.answerKey?.judge ?? {}).length +
       Object.keys(s.answerKey?.single ?? {}).length +

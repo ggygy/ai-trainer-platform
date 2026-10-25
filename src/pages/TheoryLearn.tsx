@@ -21,8 +21,9 @@ const quizLinks = quizLinksRaw as unknown as {
 /** 一道例题的作答快照：切题/切回后仍能看到当时的选择与判分 */
 type QuizState = { picked?: string | null; pickedMulti?: string[]; submitted?: boolean };
 
-export default function TheoryLearn({ go }: { go: (p: PageId) => void }) {
-  const [sel, setSel] = useState("3.1.1"); // 默认打开最高权重单元（3.1 共 18 分）的第一章
+export default function TheoryLearn({ go, initial }: { go: (p: PageId) => void; initial?: string }) {
+  // 默认打开最高权重单元（3.1 共 18 分）的第一章；答题回顾「去看讲义」传入章节代码则直接落到该章
+  const [sel, setSel] = useState(initial && LESSONS[initial] ? initial : "3.1.1");
   const lesson = LESSONS[sel];
   const [quizIdx, setQuizIdx] = useState(0); // 指向本章 quizPool 的绝对下标
   const [answersMap, setAnswersMap] = useState<Record<string, QuizState>>({}); // qKey → 作答快照

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Timer, Flag, RotateCw, FileSpreadsheet, BadgeCheck, Sparkles } from "lucide-react";
 import { Badge, Btn, Card, Chip, OptionRow } from "../components/exam-ui";
+import ExamReview, { type ReviewItem } from "../components/ExamReview";
 import theory from "../data/theory.json";
 import { aiStats, officialPaper, refAnswer } from "../lib/answers";
+import type { ExamMode } from "../lib/api";
+import { JUDGE_OPTIONS, isCorrect, resolveQuestion } from "../lib/questions";
 import { useStore } from "../lib/store";
 
 type Q = { key: string; type: "single" | "multi" | "judge"; id: number; stem: string; options: [string, string][] };
@@ -79,9 +82,9 @@ function buildWrongPaper(): { paper: Q[]; key: Record<string, string> } | null {
   return paper.length ? { paper, key } : null;
 }
 
-type Mode = "normal" | "official" | "wrong";
+type Mode = ExamMode;
 
-export default function TheoryExam({ autoPaper }: { autoPaper?: "official" | "wrong" | null }) {
+export default function TheoryExam({ autoPaper, onOpenLesson }: { autoPaper?: "official" | "wrong" | null; onOpenLesson?: (code: string) => void }) {
   const [config, setConfig] = useState<{ j: number; s: number; m: number; mode: Mode } | null>(null);
   const [officialKey, setOfficialKey] = useState<Record<string, string> | null>(null);
   const [paper, setPaper] = useState<Q[] | null>(null);
@@ -146,6 +149,7 @@ export default function TheoryExam({ autoPaper }: { autoPaper?: "official" | "wr
         mode={config.mode}
         again={() => setPaper(null)}
         marked={marked}
+        onOpenLesson={onOpenLesson}
       />
     );
 
@@ -459,6 +463,7 @@ function ResultScreen({
   mode,
   again,
   marked,
+  onOpenLesson,
 }: {
   paper: Q[];
   answers: Record<string, string[]>;
@@ -467,16 +472,16 @@ function ResultScreen({
   mode: Mode;
   again: () => void;
   marked: Set<string>;
+  onOpenLesson?: (code: string) => void;
 }) {
   const store = useStore();
   const verdict = useMemo(() => {
     const perQ = paper.map((q) => {
-      const right = officialKey ? officialKey[q.key] : refAnswer(store, q.type, q.id)?.a;
+      const right = (officialKey ? officialKey[q.key] : refAnswer(store, q.type, q.id)?.a) ?? null;
       const ans = answers[q.key] ?? [];
-      const rightArr = right ? (right.length > 1 ? right.split("").sort() : [right]) : null;
-      const ok = !!(rightArr && ans.length === rightArr.length && ans.every((a) => rightArr.includes(a)));
+      const ok = isCorrect(right, ans);
       const ref = officialKey ? ({ a: officialKey[q.key], src: "user" as const } ) : refAnswer(store, q.type, q.id);
-      return { q, ok, src: ref?.src ?? "ai", conf: ref && "conf" in ref ? ref.conf : undefined };
+      return { q, ok, right, ans, src: ref?.src ?? "ai", conf: ref && "conf" in ref ? ref.conf : undefined };
     });
     let score = 0, total = 0, userN = 0, aiLow = 0;
     for (const v of perQ) {
@@ -496,6 +501,20 @@ function ResultScreen({
   const minutes = elapsedMin;
   const savedRef = useRef(false);
 
+  // 逐题回顾：题面/选项/考点按 key 从题库还原，判分答案以本场实际判定（right）为准
+  const reviewItems = useMemo<ReviewItem[]>(
+    () =>
+      verdict.perQ.map((v) => {
+        const resolved = resolveQuestion(store, v.q.key);
+        const q = resolved
+          ? { ...resolved, answer: v.right }
+          : { key: v.q.key, type: v.q.type, id: v.q.id, official: v.q.key.startsWith("o"), stem: v.q.stem, options: v.q.type === "judge" ? JUDGE_OPTIONS : v.q.options, answer: v.right, src: null };
+        return { q, picked: v.ans, ok: v.ok, marked: marked.has(v.q.key) };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [verdict, marked],
+  );
+
   useEffect(() => {
     if (savedRef.current) return; // StrictMode 下 effect 跑两次，避免重复记录成绩
     savedRef.current = true;
@@ -512,7 +531,15 @@ function ResultScreen({
       .map((v) => ({ id: v.q.key, type: v.q.type === "single" ? "单选" : v.q.type === "multi" ? "多选" : "判断", text: v.q.stem.slice(0, 40), count: 1 }));
     // 错题重练：答对的题交卷后移出错题本（未作答的保留）
     const removeWrongKeys = mode === "wrong" ? verdict.perQ.filter((v) => v.ok).map((v) => v.q.key) : undefined;
-    useStore.getState().submitExam({ score: verdict.score, minutes, wrong, theoryKeys, removeWrongKeys });
+    const detail = {
+      mode,
+      keys: paper.map((q) => q.key),
+      answers: Object.fromEntries(Object.entries(answers).filter(([, a]) => a?.length)),
+      marked: [...marked],
+      correct,
+      total: paper.length,
+    };
+    useStore.getState().submitExam({ score: verdict.score, minutes, wrong, theoryKeys, removeWrongKeys, detail });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -548,7 +575,12 @@ function ResultScreen({
         </Btn>
         {/* 深链接（?page=exam&paper=official）下 reload 会重新进考试，回到无参数路径才是真的“返回首页” */}
         <Btn onClick={() => location.assign(location.pathname)}>返回首页</Btn>
+        <span className="self-center text-[11px] text-ink3">本场逐题数据已保存，之后可在「成绩错题 → 模拟考记录」随时回看</span>
       </div>
+
+      <Card className="mt-5">
+        <ExamReview items={reviewItems} onOpenLesson={onOpenLesson} />
+      </Card>
     </div>
   );
 }
